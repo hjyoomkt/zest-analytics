@@ -7,7 +7,7 @@ import { useAuth } from "contexts/AuthContext";
 
 export default function UserManagement() {
   const { isOpen, onOpen, onClose } = useDisclosure();
-  const { canAccessSuperAdmin, isAgency } = useAuth();
+  const { canAccessSuperAdmin, isAdvertiserAdmin, isAgency } = useAuth();
   const textColor = useColorModeValue('secondaryGray.900', 'white');
 
   return (
@@ -31,7 +31,7 @@ export default function UserManagement() {
           </Text>
         </Box>
 
-        {canAccessSuperAdmin() && (
+        {(canAccessSuperAdmin() || isAdvertiserAdmin()) && (
           <Button colorScheme="brand" onClick={onOpen}>
             + {isAgency() ? '직원 초대' : '팀원 초대'}
           </Button>
