@@ -26,9 +26,21 @@ import { MdNotificationsNone, MdInfoOutline } from 'react-icons/md';
 import { IoMdMoon, IoMdSunny } from 'react-icons/io';
 import { FaEthereum } from 'react-icons/fa';
 import routes from 'routes';
+import { useAuth } from 'contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 export default function HeaderLinks(props) {
   const { secondary } = props;
   const { colorMode, toggleColorMode } = useColorMode();
+  const { user, userName, role, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/auth/sign-in');
+  };
+
+  const displayName = userName || user?.email || '사용자';
+  const avatarInitial = displayName.charAt(0).toUpperCase();
   // Chakra Color Mode
   const navbarIcon = useColorModeValue('gray.400', 'white');
   let menuBg = useColorModeValue('white', 'navy.800');
@@ -243,7 +255,7 @@ export default function HeaderLinks(props) {
           <Avatar
             _hover={{ cursor: 'pointer' }}
             color="white"
-            name="Adela Parkson"
+            name={displayName}
             bg="#11047A"
             size="sm"
             w="40px"
@@ -270,34 +282,25 @@ export default function HeaderLinks(props) {
               fontWeight="700"
               color={textColor}
             >
-              👋&nbsp; Hey, Adela
+              👋&nbsp; {displayName}
             </Text>
           </Flex>
           <Flex flexDirection="column" p="10px">
-            <MenuItem
-              _hover={{ bg: 'none' }}
-              _focus={{ bg: 'none' }}
-              borderRadius="8px"
-              px="14px"
-            >
-              <Text fontSize="sm">Profile Settings</Text>
-            </MenuItem>
-            <MenuItem
-              _hover={{ bg: 'none' }}
-              _focus={{ bg: 'none' }}
-              borderRadius="8px"
-              px="14px"
-            >
-              <Text fontSize="sm">Newsletter Settings</Text>
-            </MenuItem>
+            <Text ps="14px" pb="4px" fontSize="xs" color="secondaryGray.600" fontWeight="500">
+              {role}
+            </Text>
+            <Text ps="14px" pb="10px" fontSize="xs" color="secondaryGray.500">
+              {user?.email}
+            </Text>
             <MenuItem
               _hover={{ bg: 'none' }}
               _focus={{ bg: 'none' }}
               color="red.400"
               borderRadius="8px"
               px="14px"
+              onClick={handleSignOut}
             >
-              <Text fontSize="sm">Log out</Text>
+              <Text fontSize="sm">로그아웃</Text>
             </MenuItem>
           </Flex>
         </MenuList>

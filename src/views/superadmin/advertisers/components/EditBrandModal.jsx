@@ -31,7 +31,6 @@ export default function EditBrandModal({ isOpen, onClose, brand }) {
     businessNumber: "",
     contactEmail: "",
     contactPhone: "",
-    metaConversionType: "purchase",
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -50,7 +49,6 @@ export default function EditBrandModal({ isOpen, onClose, brand }) {
         businessNumber: brand.business_number || "",
         contactEmail: brand.contact_email || "",
         contactPhone: brand.contact_phone || "",
-        metaConversionType: brand.meta_conversion_type || "purchase",
       });
     }
   }, [brand]);
@@ -81,7 +79,6 @@ export default function EditBrandModal({ isOpen, onClose, brand }) {
           business_number: formData.businessNumber,
           contact_email: formData.contactEmail,
           contact_phone: formData.contactPhone,
-          meta_conversion_type: formData.metaConversionType,
         })
         .eq('id', brand.id);
 
@@ -207,72 +204,6 @@ export default function EditBrandModal({ isOpen, onClose, brand }) {
                 />
               </FormControl>
 
-              {/* 메타 전환 설정 */}
-              <FormControl>
-                <FormLabel fontSize="sm" fontWeight="500" color={textColor}>
-                  메타 전환 설정
-                </FormLabel>
-                <Menu>
-                  <MenuButton
-                    as={Button}
-                    rightIcon={<MdKeyboardArrowDown />}
-                    bg={inputBg}
-                    border="1px solid"
-                    borderColor={borderColor}
-                    color={textColor}
-                    fontWeight="500"
-                    fontSize="sm"
-                    _hover={{ bg: bgHover }}
-                    _active={{ bg: bgHover }}
-                    px="16px"
-                    h="44px"
-                    borderRadius="10px"
-                    textAlign="left"
-                    w="100%"
-                  >
-                    {formData.metaConversionType === 'purchase' ? '구매 (conversions)' : '회원가입 (등록완료)'}
-                  </MenuButton>
-                  <MenuList minW="auto" w="100%" px="8px" py="8px">
-                    <MenuItem
-                      onClick={() => setFormData({ ...formData, metaConversionType: 'purchase' })}
-                      bg={formData.metaConversionType === 'purchase' ? brandColor : 'transparent'}
-                      color={formData.metaConversionType === 'purchase' ? 'white' : textColor}
-                      _hover={{
-                        bg: formData.metaConversionType === 'purchase' ? brandColor : bgHover,
-                      }}
-                      fontWeight={formData.metaConversionType === 'purchase' ? '600' : '500'}
-                      fontSize="sm"
-                      px="12px"
-                      py="8px"
-                      borderRadius="8px"
-                      justifyContent="flex-start"
-                      minH="auto"
-                    >
-                      구매 (conversions)
-                    </MenuItem>
-                    <MenuItem
-                      onClick={() => setFormData({ ...formData, metaConversionType: 'complete_registration' })}
-                      bg={formData.metaConversionType === 'complete_registration' ? brandColor : 'transparent'}
-                      color={formData.metaConversionType === 'complete_registration' ? 'white' : textColor}
-                      _hover={{
-                        bg: formData.metaConversionType === 'complete_registration' ? brandColor : bgHover,
-                      }}
-                      fontWeight={formData.metaConversionType === 'complete_registration' ? '600' : '500'}
-                      fontSize="sm"
-                      px="12px"
-                      py="8px"
-                      borderRadius="8px"
-                      justifyContent="flex-start"
-                      minH="auto"
-                    >
-                      회원가입 (등록완료)
-                    </MenuItem>
-                  </MenuList>
-                </Menu>
-                <Text fontSize="xs" color="gray.500" mt="8px">
-                  메타 광고의 전환 지표를 선택하세요. 구매 또는 회원가입 중 하나를 선택할 수 있습니다.
-                </Text>
-              </FormControl>
 
               {/* 에러 메시지 */}
               {error && (

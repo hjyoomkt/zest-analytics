@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Modal,
   ModalOverlay,
@@ -17,7 +17,10 @@ import {
   Alert,
   AlertIcon,
   useColorModeValue,
+  useToast,
 } from "@chakra-ui/react";
+import { supabase } from "config/supabase";
+import { useAuth } from "contexts/AuthContext";
 
 export default function AddBrandModal({ isOpen, onClose, organizationId }) {
   const [formData, setFormData] = useState({
@@ -27,31 +30,51 @@ export default function AddBrandModal({ isOpen, onClose, organizationId }) {
     contactEmail: "",
     contactPhone: "",
   });
+  const [organizations, setOrganizations] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const { role, organizationId: currentUserOrgId } = useAuth();
+  const toast = useToast();
   const textColor = useColorModeValue("navy.700", "white");
   const inputBg = useColorModeValue("white", "navy.900");
 
-  // Mock 조직 데이터
-  const mockOrganizations = [
-    { id: "org-booming", name: "부밍 대행사", type: "agency" },
-    { id: "org-pepper", name: "페퍼스 주식회사", type: "advertiser" },
-    { id: "org-nike", name: "나이키 코리아", type: "advertiser" },
-    { id: "org-adidas", name: "아디다스 코리아", type: "advertiser" },
-  ];
+  // organizationId가 없을 때만 조직 목록 로드
+  useEffect(() => {
+    if (isOpen && !organizationId) {
+      fetchOrganizations();
+    }
+  }, [isOpen, organizationId]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (organizationId) {
       setFormData(prev => ({ ...prev, organizationId }));
     }
   }, [organizationId]);
 
+  const fetchOrganizations = async () => {
+    try {
+      let query = supabase
+        .from('organizations')
+        .select('id, name, type')
+        .is('deleted_at', null)
+        .order('name');
+
+      // agency 역할은 자신의 조직만
+      if (role === 'agency_admin' || role === 'agency_manager') {
+        query = query.eq('id', currentUserOrgId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setOrganizations(data || []);
+    } catch (err) {
+      console.error('조직 목록 조회 실패:', err);
+    }
+  };
+
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e) => {
@@ -62,25 +85,45 @@ export default function AddBrandModal({ isOpen, onClose, organizationId }) {
       setError("조직을 선택해주세요.");
       return;
     }
-
-    if (!formData.brandName) {
+    if (!formData.brandName.trim()) {
       setError("브랜드명을 입력해주세요.");
       return;
     }
 
     setIsLoading(true);
+    try {
+      const { error: insertError } = await supabase
+        .from('advertisers')
+        .insert({
+          name: formData.brandName.trim(),
+          organization_id: formData.organizationId,
+          business_number: formData.businessNumber.trim() || null,
+          contact_email: formData.contactEmail.trim() || null,
+          contact_phone: formData.contactPhone.trim() || null,
+        });
 
-    // TODO: Supabase 연동
-    setTimeout(() => {
-      console.log("브랜드 추가:", formData);
-      setIsLoading(false);
+      if (insertError) throw insertError;
+
+      toast({
+        title: "브랜드 추가 완료",
+        description: `${formData.brandName} 브랜드가 추가되었습니다.`,
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+
       handleClose();
-    }, 1000);
+    } catch (err) {
+      console.error('브랜드 추가 실패:', err);
+      setError(err.message || "브랜드 추가에 실패했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleClose = () => {
     setFormData({
-      organizationId: "",
+      organizationId: organizationId || "",
       brandName: "",
       businessNumber: "",
       contactEmail: "",
@@ -117,7 +160,7 @@ export default function AddBrandModal({ isOpen, onClose, organizationId }) {
                   bg={inputBg}
                   isDisabled={!!organizationId}
                 >
-                  {mockOrganizations.map((org) => (
+                  {organizations.map((org) => (
                     <option key={org.id} value={org.id}>
                       {org.name} ({org.type === 'agency' ? '대행사' : '광고주'})
                     </option>

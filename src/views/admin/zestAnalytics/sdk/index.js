@@ -20,7 +20,7 @@
   // API 엔드포인트 (실제 배포 시 변경 필요)
   const API_ENDPOINT =
     window.ZA_API_ENDPOINT ||
-    'https://qdzdyoqtzkfpcogecyar.supabase.co/functions/v1/za-collect-event';
+    'https://ptktgcqsdkjxaxjgdqvw.supabase.co/functions/v1/za-collect-event';
 
   /**
    * Zest Analytics 클래스

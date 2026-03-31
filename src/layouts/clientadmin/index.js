@@ -5,10 +5,12 @@ import Footer from 'components/footer/FooterAdmin.js';
 // Layout components
 import Navbar from 'components/navbar/NavbarAdmin.js';
 import Sidebar from 'components/sidebar/Sidebar.js';
+import AdminIconSidebar from 'components/sidebar/AdminIconSidebar.js';
 import { SidebarContext } from 'contexts/SidebarContext';
 import React, { useState } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import clientAdminRoutes from 'clientAdminRoutes.js';
+import routes from 'routes.js';
 import { useAuth } from 'contexts/AuthContext';
 
 export default function ClientAdminLayout(props) {
@@ -199,7 +201,8 @@ export default function ClientAdminLayout(props) {
             setToggleSidebar,
           }}
         >
-          <Sidebar routes={clientAdminRoutes} {...rest} />
+          <AdminIconSidebar routes={routes} {...rest} />
+          <Sidebar routes={clientAdminRoutes} left="70px" {...rest} />
           <Box
             float="right"
             minHeight="100vh"
@@ -207,8 +210,8 @@ export default function ClientAdminLayout(props) {
             overflow="auto"
             position="relative"
             maxHeight="100%"
-            w={{ base: '100%', xl: 'calc( 100% - 230px )' }}
-            maxWidth={{ base: '100%', xl: 'calc( 100% - 230px )' }}
+            w={{ base: '100%', xl: 'calc( 100% - 370px )' }}
+            maxWidth={{ base: '100%', xl: 'calc( 100% - 370px )' }}
             transition="all 0.33s cubic-bezier(0.685, 0.0473, 0.346, 1)"
             transitionDuration=".2s, .2s, .35s"
             transitionProperty="top, bottom, width"
@@ -225,6 +228,7 @@ export default function ClientAdminLayout(props) {
                   message={getActiveNavbarText(clientAdminRoutes)}
                   fixed={fixed}
                   routes={clientAdminRoutes}
+                  navbarLeft="370px"
                 />
               </Box>
             </Portal>

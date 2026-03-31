@@ -1,116 +1,77 @@
-/*!
-  _   _  ___  ____  ___ ________  _   _   _   _ ___   
- | | | |/ _ \|  _ \|_ _|__  / _ \| \ | | | | | |_ _| 
- | |_| | | | | |_) || |  / / | | |  \| | | | | || | 
- |  _  | |_| |  _ < | | / /| |_| | |\  | | |_| || |
- |_| |_|\___/|_| \_\___/____\___/|_| \_|  \___/|___|
-                                                                                                                                                                                                                                                                                                                                       
-=========================================================
-* Horizon UI - v1.1.0
-=========================================================
-
-* Product Page: https://www.horizon-ui.com/
-* Copyright 2023 Horizon UI (https://www.horizon-ui.com/)
-
-* Designed and Coded by Simmmple
-
-=========================================================
-
-* The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-*/
-
-// Chakra imports
 import { Box, Grid } from "@chakra-ui/react";
 
-// Custom components
 import Banner from "views/admin/profile/components/Banner";
-import General from "views/admin/profile/components/General";
+import APIStatus from "views/admin/profile/components/APIStatus";
 import Notifications from "views/admin/profile/components/Notifications";
-import Projects from "views/admin/profile/components/Projects";
-import Storage from "views/admin/profile/components/Storage";
 import Upload from "views/admin/profile/components/Upload";
+import BrandsList from "views/admin/profile/components/BrandsList";
+import MiniCalendar from "components/calendar/MiniCalendar";
 
-// Assets
 import banner from "assets/img/auth/banner.png";
 import avatar from "assets/img/avatars/avatar4.png";
 import React from "react";
+import { useAuth } from "contexts/AuthContext";
 
 export default function Overview() {
+  const { user, role, userName, availableAdvertisers } = useAuth();
+
+  const roleLabels = {
+    master: '마스터',
+    agency_admin: '대행사 최고관리자',
+    agency_manager: '대행사 관리자',
+    advertiser_admin: '브랜드 대표운영자',
+    advertiser_staff: '브랜드 부운영자',
+    viewer: '뷰어',
+  };
+
+  const displayName = userName || user?.email?.split('@')[0] || 'User';
+
   return (
     <Box pt={{ base: "130px", md: "80px", xl: "80px" }}>
-      {/* Main Fields */}
       <Grid
-        templateColumns={{
-          base: "1fr",
-          lg: "1.34fr 1fr 1.62fr",
-        }}
-        templateRows={{
-          base: "repeat(3, 1fr)",
-          lg: "1fr",
-        }}
+        templateColumns={{ base: "1fr", lg: "1.34fr 1fr 1.62fr" }}
+        templateRows={{ base: "repeat(3, 1fr)", lg: "1fr" }}
         gap={{ base: "20px", xl: "20px" }}>
         <Banner
           gridArea='1 / 1 / 2 / 2'
           banner={banner}
           avatar={avatar}
-          name='Adela Parkson'
-          job='Product Designer'
-          posts='17'
-          followers='9.7k'
-          following='274'
+          name={displayName}
+          job={roleLabels[role] || role}
+          roleLevel={roleLabels[role] || role}
+          brandCount={availableAdvertisers?.length || 0}
+          h={{ base: "auto", lg: "365px" }}
         />
-        <Storage
+        <MiniCalendar
           gridArea={{ base: "2 / 1 / 3 / 2", lg: "1 / 2 / 2 / 3" }}
-          used={25.6}
-          total={50}
+          h={{ base: "auto", lg: "365px" }}
         />
         <Upload
-          gridArea={{
-            base: "3 / 1 / 4 / 2",
-            lg: "1 / 3 / 2 / 4",
-          }}
-          minH={{ base: "auto", lg: "420px", "2xl": "365px" }}
+          gridArea={{ base: "3 / 1 / 4 / 2", lg: "1 / 3 / 2 / 4" }}
+          h={{ base: "auto", lg: "365px" }}
           pe='20px'
           pb={{ base: "100px", lg: "20px" }}
         />
       </Grid>
       <Grid
         mb='20px'
-        templateColumns={{
-          base: "1fr",
-          lg: "repeat(2, 1fr)",
-          "2xl": "1.34fr 1.62fr 1fr",
-        }}
-        templateRows={{
-          base: "1fr",
-          lg: "repeat(2, 1fr)",
-          "2xl": "1fr",
-        }}
-        gap={{ base: "20px", xl: "20px" }}>
-        <Projects
-          gridArea='1 / 2 / 2 / 2'
-          banner={banner}
-          avatar={avatar}
-          name='Adela Parkson'
-          job='Product Designer'
-          posts='17'
-          followers='9.7k'
-          following='274'
+        templateColumns={{ base: "1fr", lg: "repeat(2, 1fr)", "2xl": "repeat(3, 1fr)" }}
+        templateRows={{ base: "repeat(3, 1fr)", lg: "repeat(2, 1fr)", "2xl": "1fr" }}
+        gap={{ base: "20px", xl: "20px" }}
+        alignItems="start">
+        <BrandsList
+          brands={availableAdvertisers}
+          gridArea={{ base: "1 / 1 / 2 / 2", lg: "1 / 1 / 2 / 2", "2xl": "1 / 1 / 2 / 2" }}
+          h={{ base: "auto", lg: "550px" }}
         />
-        <General
-          gridArea={{ base: "2 / 1 / 3 / 2", lg: "1 / 2 / 2 / 3" }}
-          minH='365px'
+        <APIStatus
+          gridArea={{ base: "2 / 1 / 3 / 2", lg: "1 / 2 / 2 / 3", "2xl": "1 / 2 / 2 / 3" }}
+          h={{ base: "auto", lg: "550px" }}
           pe='20px'
         />
         <Notifications
-          used={25.6}
-          total={50}
-          gridArea={{
-            base: "3 / 1 / 4 / 2",
-            lg: "2 / 1 / 3 / 3",
-            "2xl": "1 / 3 / 2 / 4",
-          }}
+          gridArea={{ base: "3 / 1 / 4 / 2", lg: "2 / 1 / 3 / 3", "2xl": "1 / 3 / 2 / 4" }}
+          h={{ base: "auto", lg: "550px" }}
         />
       </Grid>
     </Box>
