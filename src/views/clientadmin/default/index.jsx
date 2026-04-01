@@ -16,6 +16,7 @@ import {
 } from "react-icons/md";
 import { useAuth } from "contexts/AuthContext";
 import { getUsers } from "services/supabaseService";
+import TrackingCodeManager from "views/admin/zestAnalytics/components/TrackingCodeManager";
 
 export default function ClientAdminDashboard() {
   const brandColor = useColorModeValue("brand.500", "white");
@@ -23,7 +24,7 @@ export default function ClientAdminDashboard() {
   const textColor = useColorModeValue("secondaryGray.900", "white");
   const cardBg = useColorModeValue("white", "navy.700");
 
-  const { user, role, organizationId, advertiserId, organizationType } = useAuth();
+  const { user, role, organizationId, advertiserId, organizationType, currentAdvertiserId } = useAuth();
   const [stats, setStats] = useState({
     totalUsers: 0,
     adminUsers: 0,
@@ -139,6 +140,15 @@ export default function ClientAdminDashboard() {
           Home 버튼을 클릭하면 메인 대시보드로 돌아갑니다.
         </Text>
       </Box>
+
+      {currentAdvertiserId && (
+        <Box mt="20px">
+          <Text color={textColor} fontSize="xl" fontWeight="700" mb="16px">
+            제스트 애널리틱스 추적 코드
+          </Text>
+          <TrackingCodeManager advertiserId={currentAdvertiserId} role={role} />
+        </Box>
+      )}
     </Box>
   );
 }

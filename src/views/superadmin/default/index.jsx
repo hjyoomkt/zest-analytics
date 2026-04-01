@@ -16,6 +16,7 @@ import {
 } from "react-icons/md";
 import { getUserStats } from "services/supabaseService";
 import { useAuth } from "contexts/AuthContext";
+import TrackingCodeManager from "views/admin/zestAnalytics/components/TrackingCodeManager";
 
 export default function SuperAdminDashboard() {
   const brandColor = useColorModeValue("brand.500", "white");
@@ -23,7 +24,8 @@ export default function SuperAdminDashboard() {
   const textColor = useColorModeValue("secondaryGray.900", "white");
   const cardBg = useColorModeValue("white", "navy.700");
 
-  const { user, role, organizationId } = useAuth();
+  const { user, role, organizationId, availableAdvertisers } = useAuth();
+  const [selectedBrandId, setSelectedBrandId] = useState('');
   const [stats, setStats] = useState({
     totalUsers: 0,
     adminUsers: 0,
@@ -124,6 +126,19 @@ export default function SuperAdminDashboard() {
         <Text color={textColor} fontSize="sm" mt="10px">
           Home 버튼을 클릭하면 메인 대시보드로 돌아갑니다.
         </Text>
+      </Box>
+
+      <Box mt="20px">
+        <Text color={textColor} fontSize="xl" fontWeight="700" mb="16px">
+          제스트 애널리틱스 추적 코드
+        </Text>
+        <TrackingCodeManager
+          advertiserId={selectedBrandId || null}
+          role={role}
+          availableAdvertisers={availableAdvertisers}
+          selectedBrandId={selectedBrandId}
+          onBrandChange={setSelectedBrandId}
+        />
       </Box>
     </Box>
   );
