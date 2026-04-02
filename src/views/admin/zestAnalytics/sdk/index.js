@@ -10,12 +10,13 @@
  * - 어트리뷰션 윈도우 (클릭 후 1일/7일/28일)
  * - 라스트 클릭 기준
  * - 전환 이벤트 추적 (구매, 회원가입, 리드 등)
+ * - 스크롤 도달률 추적 (최대 도달 %, session_end에 기록)
  */
 
 (function (window) {
   'use strict';
 
-  const SDK_VERSION = '1.0.0';
+  const SDK_VERSION = '1.2.0';
 
   // API 엔드포인트 (실제 배포 시 변경 필요)
   const API_ENDPOINT =
@@ -36,8 +37,16 @@
       this.queue = [];
       this.isInitialized = false;
       this.sessionId = 'ses_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      this.sessionStartTime = null;
+      this.visitorId = this._getOrCreateVisitorId();
       this.isNewVisitor = false;
+      this.maxScrollDepth = 0;
+      // GA 스타일 세션 추적
+      this.activeStartTime = null;   // 현재 활성 구간 시작 시각
+      this.accumulatedTime = 0;      // 누적 활성 시간 (초)
+      this.lastInteractionTime = null;
+      this.idleTimer = null;
+      this.IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
+      this.MIN_SESSION_DURATION = 3;       // 3초 미만 노이즈 필터
     }
 
     /**
@@ -74,14 +83,34 @@
       // 페이지뷰 자동 추적
       this.trackPageView();
 
-      // 체류시간 추적 (페이지 이탈 시)
-      const handleLeave = () => {
+      // 스크롤 도달률 추적
+      window.addEventListener('scroll', () => this._trackScrollDepth(), { passive: true });
+      // 초기 로드 시 스크롤 위치 반영 (긴 페이지에서 앵커 링크 진입 등)
+      this._trackScrollDepth();
+
+      // GA 스타일 세션 추적
+      this.activeStartTime = Date.now();
+      this.lastInteractionTime = Date.now();
+
+      // 상호작용 감지 (idle 타이머 리셋용)
+      ['mousemove', 'mousedown', 'keydown', 'click', 'scroll', 'wheel', 'touchstart', 'touchmove'].forEach((evt) =>
+        window.addEventListener(evt, () => this._onInteraction(), { passive: true })
+      );
+
+      // idle 타이머 시작
+      this._resetIdleTimer();
+
+      // 탭 전환 처리
+      document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
-          this._trackDuration();
+          this._pauseSession();
+        } else {
+          this._resumeSession();
         }
-      };
-      document.addEventListener('visibilitychange', handleLeave);
-      window.addEventListener('beforeunload', () => this._trackDuration());
+      });
+
+      // 실제 이탈
+      window.addEventListener('beforeunload', () => this._endSession());
 
       // 대기열 처리
       this._flushQueue();
@@ -129,14 +158,13 @@
         return;
       }
 
-      this.sessionStartTime = Date.now();
-
       const payload = {
         tracking_id: this.trackingId,
         event_type: 'pageview',
         page_url: window.location.href,
         page_referrer: document.referrer || null,
         session_id: this.sessionId,
+        visitor_id: this.visitorId,
         channel: this._detectChannel(),
         is_new_visitor: this.isNewVisitor,
         ...this._getDeviceInfo(),
@@ -336,6 +364,14 @@
         const stored = localStorage.getItem('za_params');
         if (stored) {
           const params = JSON.parse(stored);
+          // 어트리뷰션 윈도우(28일) 초과 시 무시
+          if (params.clicked_at) {
+            const daysSince = (Date.now() - new Date(params.clicked_at)) / (1000 * 60 * 60 * 24);
+            if (daysSince > this.config.attributionWindow) {
+              localStorage.removeItem('za_params');
+              return !document.referrer ? 'direct' : 'referral';
+            }
+          }
           const source = (params.utm_source || '').toLowerCase();
           const medium = (params.utm_medium || '').toLowerCase();
 
@@ -377,6 +413,25 @@
     }
 
     /**
+     * 영구 방문자 ID 조회 또는 생성 (localStorage 기반)
+     * 같은 브라우저라면 페이지 이동/재방문해도 동일 ID 유지
+     * @private
+     */
+    _getOrCreateVisitorId() {
+      try {
+        const key = 'za_vid';
+        let vid = localStorage.getItem(key);
+        if (!vid) {
+          vid = 'v_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+          localStorage.setItem(key, vid);
+        }
+        return vid;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    /**
      * 신규/재방문 체크
      * @private
      */
@@ -395,15 +450,104 @@
     }
 
     /**
-     * 체류시간 전송 (페이지 이탈 시)
+     * 스크롤 도달률 갱신 (이벤트 리스너에서 호출)
      * @private
      */
-    _trackDuration() {
-      if (!this.sessionStartTime || !this.trackingId) return;
-      const duration = Math.round((Date.now() - this.sessionStartTime) / 1000);
-      if (duration < 1) return;
+    _trackScrollDepth() {
+      if (!document.body) return;
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const docHeight = Math.max(
+        document.body.scrollHeight, document.documentElement.scrollHeight,
+        document.body.offsetHeight, document.documentElement.offsetHeight,
+        document.body.clientHeight, document.documentElement.clientHeight
+      ) - window.innerHeight;
 
-      this.sessionStartTime = null; // 중복 전송 방지
+      if (docHeight <= 0) {
+        // 스크롤이 필요 없는 짧은 페이지 → 100% 도달로 간주
+        this.maxScrollDepth = 100;
+        return;
+      }
+
+      const depth = Math.min(100, Math.round((scrollTop / docHeight) * 100));
+      if (depth > this.maxScrollDepth) {
+        this.maxScrollDepth = depth;
+      }
+    }
+
+    /**
+     * 상호작용 감지 → idle 타이머 리셋
+     * @private
+     */
+    _onInteraction() {
+      this.lastInteractionTime = Date.now();
+      if (this.activeStartTime === null) {
+        // idle 상태에서 복귀 → 활성 구간 재시작
+        this.activeStartTime = Date.now();
+      }
+      this._resetIdleTimer();
+    }
+
+    /**
+     * idle 타이머 리셋 (30분 무활동 시 세션 종료)
+     * @private
+     */
+    _resetIdleTimer() {
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+      this.idleTimer = setTimeout(() => this._onIdle(), this.IDLE_TIMEOUT);
+    }
+
+    /**
+     * 30분 무활동 → 세션 종료 후 새 세션 준비
+     * @private
+     */
+    _onIdle() {
+      if (this.activeStartTime !== null) {
+        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+      this._sendSessionEnd();
+      this._resetSession();
+    }
+
+    /**
+     * 탭 숨김 → 활성 시간 누적 일시정지
+     * @private
+     */
+    _pauseSession() {
+      if (this.activeStartTime !== null) {
+        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+    }
+
+    /**
+     * 탭 복귀 → 활성 구간 재시작
+     * @private
+     */
+    _resumeSession() {
+      this.activeStartTime = Date.now();
+      this._resetIdleTimer();
+    }
+
+    /**
+     * 실제 페이지 이탈 → 세션 종료
+     * @private
+     */
+    _endSession() {
+      if (this.activeStartTime !== null) {
+        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+      this._sendSessionEnd();
+    }
+
+    /**
+     * session_end 이벤트 전송
+     * @private
+     */
+    _sendSessionEnd() {
+      if (!this.trackingId || this.accumulatedTime < this.MIN_SESSION_DURATION) return;
 
       fetch(API_ENDPOINT, {
         method: 'POST',
@@ -412,11 +556,25 @@
           tracking_id: this.trackingId,
           event_type: 'session_end',
           session_id: this.sessionId,
-          time_on_page: duration,
+          time_on_page: this.accumulatedTime,
           page_url: window.location.href,
+          scroll_depth: this.maxScrollDepth,
+          channel: this._detectChannel(),
         }),
         keepalive: true,
       }).catch(() => {});
+    }
+
+    /**
+     * 새 세션 초기화 (idle timeout 후 재방문 대비)
+     * @private
+     */
+    _resetSession() {
+      this.sessionId = 'ses_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      this.accumulatedTime = 0;
+      this.activeStartTime = null;
+      this.maxScrollDepth = 0;
+      this.idleTimer = null;
     }
 
     /**

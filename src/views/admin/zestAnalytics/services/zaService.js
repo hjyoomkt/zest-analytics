@@ -395,6 +395,177 @@ export const getRecentEvents = async (advertiserId, availableAdvertiserIds, limi
   }
 };
 
+// ============================================================================
+// 트래픽 분석 (시간대별 / 페이지별 / 채널별)
+// ============================================================================
+
+/**
+ * 공통: advertiser_ids 배열 생성 헬퍼
+ * @private
+ */
+const _resolveAdvertiserIds = (advertiserId, availableAdvertiserIds) => {
+  if (advertiserId) return [advertiserId];
+  return availableAdvertiserIds && availableAdvertiserIds.length > 0
+    ? availableAdvertiserIds
+    : [];
+};
+
+/**
+ * 시간대별 방문자 수 (고유 세션 기준, KST 0~23시)
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {Array<string>} params.availableAdvertiserIds
+ * @param {string} params.startDate - YYYY-MM-DD
+ * @param {string} params.endDate   - YYYY-MM-DD
+ * @returns {Promise<Array<{hour: number, visitor_count: number}>>} 24개 항목
+ */
+export const getHourlyVisitors = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return Array.from({ length: 24 }, (_, i) => ({ hour: i, visitor_count: 0 }));
+
+    const { data, error } = await supabase.rpc('get_hourly_visitors', {
+      p_advertiser_ids: ids,
+      p_start: `${startDate}T00:00:00+09:00`,
+      p_end: `${endDate}T23:59:59+09:00`,
+    });
+
+    if (error) throw error;
+
+    const result = Array.from({ length: 24 }, (_, i) => ({ hour: i, visitor_count: 0 }));
+    (data || []).forEach(({ hour_of_day, visitor_count }) => {
+      result[hour_of_day].visitor_count = Number(visitor_count);
+    });
+    return result;
+  } catch (error) {
+    console.error('[ZA Service] getHourlyVisitors error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 시간대별 페이지뷰 수 (KST 0~23시)
+ * @param {object} params
+ * @returns {Promise<Array<{hour: number, pageview_count: number}>>} 24개 항목
+ */
+export const getHourlyPageViews = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return Array.from({ length: 24 }, (_, i) => ({ hour: i, pageview_count: 0 }));
+
+    const { data, error } = await supabase.rpc('get_hourly_pageviews', {
+      p_advertiser_ids: ids,
+      p_start: `${startDate}T00:00:00+09:00`,
+      p_end: `${endDate}T23:59:59+09:00`,
+    });
+
+    if (error) throw error;
+
+    const result = Array.from({ length: 24 }, (_, i) => ({ hour: i, pageview_count: 0 }));
+    (data || []).forEach(({ hour_of_day, pageview_count }) => {
+      result[hour_of_day].pageview_count = Number(pageview_count);
+    });
+    return result;
+  } catch (error) {
+    console.error('[ZA Service] getHourlyPageViews error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 페이지별 스크롤 도달률 통계
+ * @param {object} params
+ * @returns {Promise<Array>} 페이지별 {page_url, total_sessions, avg_scroll_depth, reach_25, reach_50, reach_75, reach_100}
+ */
+export const getPageScrollStats = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const { data, error } = await supabase.rpc('get_page_scroll_stats', {
+      p_advertiser_ids: ids,
+      p_start: `${startDate}T00:00:00+09:00`,
+      p_end: `${endDate}T23:59:59+09:00`,
+    });
+
+    if (error) throw error;
+
+    return (data || []).map((row) => ({
+      ...row,
+      avg_scroll_depth: Number(row.avg_scroll_depth),
+      total_sessions: Number(row.total_sessions),
+      reach_25: Number(row.reach_25),
+      reach_50: Number(row.reach_50),
+      reach_75: Number(row.reach_75),
+      reach_100: Number(row.reach_100),
+      // 도달률 비율 (%)
+      reach_25_pct: row.total_sessions > 0 ? Math.round((row.reach_25 / row.total_sessions) * 100) : 0,
+      reach_50_pct: row.total_sessions > 0 ? Math.round((row.reach_50 / row.total_sessions) * 100) : 0,
+      reach_75_pct: row.total_sessions > 0 ? Math.round((row.reach_75 / row.total_sessions) * 100) : 0,
+      reach_100_pct: row.total_sessions > 0 ? Math.round((row.reach_100 / row.total_sessions) * 100) : 0,
+    }));
+  } catch (error) {
+    console.error('[ZA Service] getPageScrollStats error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 유입 경로별 성과 (페이지뷰, 체류시간, 스크롤 도달률)
+ * @param {object} params
+ * @returns {Promise<Array>} 채널별 {channel, pageview_count, unique_sessions,
+ *   avg_time_on_page, avg_scroll_depth, reach_25_pct, reach_50_pct, reach_75_pct, reach_100_pct}
+ */
+export const getChannelPerformance = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const { data, error } = await supabase.rpc('get_channel_performance', {
+      p_advertiser_ids: ids,
+      p_start: `${startDate}T00:00:00+09:00`,
+      p_end: `${endDate}T23:59:59+09:00`,
+    });
+
+    if (error) throw error;
+
+    return (data || []).map((row) => ({
+      ...row,
+      pageview_count: Number(row.pageview_count),
+      unique_sessions: Number(row.unique_sessions),
+      avg_time_on_page: Number(row.avg_time_on_page),
+      avg_scroll_depth: Number(row.avg_scroll_depth),
+      reach_25_pct: Number(row.reach_25_pct),
+      reach_50_pct: Number(row.reach_50_pct),
+      reach_75_pct: Number(row.reach_75_pct),
+      reach_100_pct: Number(row.reach_100_pct),
+    }));
+  } catch (error) {
+    console.error('[ZA Service] getChannelPerformance error:', error);
+    throw error;
+  }
+};
+
 /**
  * 일별 이벤트 통계 (테이블용)
  * @param {object} params - 조회 파라미터

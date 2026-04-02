@@ -25,7 +25,11 @@ public/
 ├── favicon.ico          브라우저 탭 아이콘
 ├── index.html           HTML 진입점
 ├── manifest.json        PWA 매니페스트
-└── robots.txt           검색 엔진 크롤러 규칙
+├── robots.txt           검색 엔진 크롤러 규칙
+└── sdk/
+    └── za-sdk.js        Zest Analytics SDK 빌드 결과물 (build.js로 생성)
+                         로컬: http://localhost:3000/sdk/za-sdk.js
+                         운영: https://analytics.zestdot.com/sdk/za-sdk.js
 ```
 
 ---
@@ -180,6 +184,7 @@ src/variables/
 src/views/
 ├── superadmin/                          슈퍼어드민 패널 (master/agency 역할)
 │   ├── default/index.jsx                대시보드 (총 유저·관리자·활성 유저 통계)
+│   │                                    + 브랜드 선택 드롭다운 → TrackingCodeManager (브랜드 대행 추적 코드 발급)
 │   ├── users/index.jsx                  권한 관리 (UserTable + InviteUserModal)
 │   └── advertisers/                     광고주·브랜드 관리
 │       ├── index.jsx                    조직별 트리 뷰 + 모달 상태 관리
@@ -192,7 +197,7 @@ src/views/
 │           └── InviteAgencyModal.jsx    신규 에이전시 초대
 │
 ├── clientadmin/                         클라이언트어드민 패널 (advertiser 역할)
-│   ├── default/index.jsx                대시보드 (팀 통계)
+│   ├── default/index.jsx                대시보드 (팀 통계) + TrackingCodeManager (currentAdvertiserId 기준 추적 코드 발급)
 │   └── brands/                          브랜드 목록
 │       ├── index.jsx                    접근 가능 브랜드 카드 그리드
 │       └── components/
@@ -253,11 +258,42 @@ src/views/
 │       │   ├── AttributionAnalysis.jsx  어트리뷰션 윈도우별 분석 (1일/7일/28일)
 │       │   ├── CampaignPerformance.jsx  캠페인별 성과 테이블
 │       │   └── TrackingCodeManager.jsx  추적 코드 생성/재생성/삭제/설치 가이드
+│       │                                props: advertiserId, role
+│       │                                       availableAdvertisers, selectedBrandId, onBrandChange (슈퍼어드민용 브랜드 선택 내장)
+│       │                                설치 가이드 모달: 7개 탭 (기본설치/구매/회원가입/리드/장바구니/커스텀/UTM)
+│       │                                                  Horizon UI pill 탭 + 다크 코드 블록 + 복사 버튼
 │       ├── services/
 │       │   └── zaService.js             Supabase API 호출 (za_tracking_codes, za_events)
+│       │                                ── 기존 ──
+│       │                                - getTrackingCodes / createTrackingCode / regenerateTrackingCode
+│       │                                - getEventStatistics / getAttributionStats / getCampaignPerformance
+│       │                                - getRecentEvents / getDailyEventStats
+│       │                                ── 신규 (트래픽 분석) ──
+│       │                                - getHourlyVisitors → get_hourly_visitors RPC (visitor_id 기준 고유 방문자)
+│       │                                - getHourlyPageViews → get_hourly_pageviews RPC
+│       │                                - getPageScrollStats → get_page_scroll_stats RPC (25/50/75/100% 도달률)
+│       │                                - getChannelPerformance → get_channel_performance RPC (채널별 종합 성과)
 │       └── sdk/
-│           ├── index.js                 광고주 웹사이트용 JS SDK (IIFE, window.zestAnalytics)
+│           ├── index.js                 광고주 웹사이트용 JS SDK v1.3.0 (IIFE, window.zestAnalytics)
+│           │                            - init() → 페이지뷰 자동 추적, GA 스타일 세션 추적 리스너 등록
+│           │                            - trackPageView() → channel / is_new_visitor / session_id / visitor_id / device 포함
+│           │                            - track(eventType, data) → 전환 이벤트
+│           │                            - _detectChannel() → UTM 우선(28일 윈도우 체크), referrer 분석
+│           │                            - _checkVisitorStatus() → localStorage za_visitor 기반 신규/재방문
+│           │                            - _getOrCreateVisitorId() → localStorage za_vid 기반 브라우저별 고유 방문자 ID
+│           │                            - _trackScrollDepth() → scroll 이벤트로 maxScrollDepth(0~100) 실시간 갱신
+│           │                            ── GA 스타일 세션 추적 ──
+│           │                            - _onInteraction() → 상호작용 감지(8종), idle 타이머 리셋
+│           │                            - _resetIdleTimer() → 30분 무활동 타이머 리셋
+│           │                            - _onIdle() → 30분 무활동 시 세션 종료 + 새 세션 초기화
+│           │                            - _pauseSession() → 탭 hidden 시 누적 일시정지
+│           │                            - _resumeSession() → 탭 visible 시 타이머 재시작
+│           │                            - _endSession() → beforeunload 시 최종 누적 후 전송
+│           │                            - _sendSessionEnd() → fetch keepalive, 3초 미만 노이즈 필터
+│           │                            - _resetSession() → 새 sessionId 발급, 누적값 초기화
+│           │                            SDK URL: https://analytics.zestdot.com/sdk/za-sdk.js
 │           └── build.js                 SDK를 public/sdk/za-sdk.js로 복사하는 빌드 스크립트
+│                                        실행: node src/views/admin/zestAnalytics/sdk/build.js
 │
 └── auth/
     ├── signIn/index.jsx             로그인 페이지
@@ -353,6 +389,15 @@ src/assets/
 | 2026-03-31 | growth-analytics 전용 Supabase 프로젝트 분리 — `.env` 및 `sdk/index.js` URL 교체 (`qdzdyoqtzkfpcogecyar`) | - |
 | 2026-03-31 | `ads-library`에서 어드민 시스템 전체 이식 — 슈퍼어드민/클라이언트어드민 패널, 유저·브랜드·에이전시 관리 | `어드민_시스템_이식.md` |
 | 2026-03-31 | RLS 무한재귀 버그 수정, 사이드바 겹침 수정, 네비게이션 실유저 연동, `/admin/profile` 페이지 전면 개편 | `수퍼베이스_DB_세팅.md` |
+| 2026-04-02 | 추적 코드 발급 UI — clientadmin/superadmin 대시보드에 TrackingCodeManager 통합, 브랜드 대행 발급 기능 | `CHANGELOG.md` |
+| 2026-04-02 | 설치 가이드 모달 리디자인 — 7탭 구조, Horizon UI 스타일, 다크 코드 블록 | `CHANGELOG.md` |
+| 2026-04-02 | SDK v1.1.0 — 페이지뷰 자동 추적, 유입 채널 감지, 신규/재방문 구분, 체류시간 추적, SDK URL 변경 | `수퍼베이스_DB_세팅.md` |
+| 2026-04-02 | za_events 컬럼 추가 (channel/is_new_visitor/session_id/time_on_page), session_end 이벤트 타입 추가 | `수퍼베이스_DB_세팅.md` |
+| 2026-04-02 | za-collect-event Edge Function 재배포 — Deno.serve 교체, JWT OFF, session_end 지원 | `수퍼베이스_DB_세팅.md` |
+| 2026-04-02 | 트래픽 분석 4기능 백엔드 구현 — scroll_depth/visitor_id 컬럼, RPC 함수 4개, 인덱스 2개 | `수퍼베이스_DB_세팅.md` Part 8 |
+| 2026-04-02 | SDK v1.2.0 — 스크롤 도달률 추적, visitor_id 도입, 채널 어트리뷰션 윈도우 버그 수정 | `CHANGELOG.md` |
+| 2026-04-02 | za-collect-event Edge Function 재배포 — scroll_depth, visitor_id, channel(session_end) 처리 추가 | `za-collect-event.ts` |
+| 2026-04-02 | SDK v1.3.0 — GA 스타일 세션 추적 (탭 전환 일시정지/재개, 30분 idle timeout, 3초 노이즈 필터, 8종 상호작용 감지) | `CHANGELOG.md` |
 
 ### 어드민 시스템 이식 상세 (2026-03-31)
 
