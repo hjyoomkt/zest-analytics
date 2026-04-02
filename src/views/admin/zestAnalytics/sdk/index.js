@@ -30,11 +30,14 @@
       this.trackingId = null;
       this.config = {
         debug: false,
-        autoCapture: true, // 자동 UTM 파라미터 캡처
-        attributionWindow: 28, // 기본 어트리뷰션 윈도우 (일)
+        autoCapture: true,
+        attributionWindow: 28,
       };
-      this.queue = []; // 오프라인 대기열
+      this.queue = [];
       this.isInitialized = false;
+      this.sessionId = 'ses_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      this.sessionStartTime = null;
+      this.isNewVisitor = false;
     }
 
     /**
@@ -60,6 +63,9 @@
         });
       }
 
+      // 신규/재방문 체크
+      this.isNewVisitor = this._checkVisitorStatus();
+
       // UTM/ZA 파라미터 자동 캡처 및 저장
       if (this.config.autoCapture) {
         this._captureParams();
@@ -67,6 +73,15 @@
 
       // 페이지뷰 자동 추적
       this.trackPageView();
+
+      // 체류시간 추적 (페이지 이탈 시)
+      const handleLeave = () => {
+        if (document.visibilityState === 'hidden') {
+          this._trackDuration();
+        }
+      };
+      document.addEventListener('visibilitychange', handleLeave);
+      window.addEventListener('beforeunload', () => this._trackDuration());
 
       // 대기열 처리
       this._flushQueue();
@@ -114,16 +129,18 @@
         return;
       }
 
+      this.sessionStartTime = Date.now();
+
       const payload = {
         tracking_id: this.trackingId,
         event_type: 'pageview',
         page_url: window.location.href,
         page_referrer: document.referrer || null,
+        session_id: this.sessionId,
+        channel: this._detectChannel(),
+        is_new_visitor: this.isNewVisitor,
+        ...this._getDeviceInfo(),
       };
-
-      if (this.config.debug) {
-        console.log('[ZA] Tracking pageview:', payload);
-      }
 
       this._sendEvent(payload);
     }
@@ -307,6 +324,99 @@
       else if (ua.includes('iOS') || ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
 
       return { device_type: deviceType, browser, os };
+    }
+
+    /**
+     * 유입 채널 감지
+     * @private
+     */
+    _detectChannel() {
+      try {
+        // UTM/ZA 파라미터 우선 적용
+        const stored = localStorage.getItem('za_params');
+        if (stored) {
+          const params = JSON.parse(stored);
+          const source = (params.utm_source || '').toLowerCase();
+          const medium = (params.utm_medium || '').toLowerCase();
+
+          if (source) {
+            if (source.includes('google')) return (medium === 'cpc' || medium === 'ppc' || medium === 'paid') ? 'google_ads' : 'google';
+            if (source.includes('naver')) return (medium === 'cpc' || medium === 'ppc') ? 'naver_ads' : 'naver';
+            if (source.includes('kakao')) return 'kakao';
+            if (source.includes('instagram')) return 'instagram';
+            if (source.includes('facebook') || source.includes('fb')) return 'facebook';
+            if (source.includes('youtube')) return 'youtube';
+            if (source.includes('tiktok')) return 'tiktok';
+            if (source.includes('twitter') || source.includes('x')) return 'twitter';
+            if (medium === 'email') return 'email';
+            return source;
+          }
+          if (medium === 'email') return 'email';
+        }
+
+        // referrer 분석
+        const referrer = document.referrer;
+        if (!referrer) return 'direct';
+
+        const r = referrer.toLowerCase();
+        if (r.includes('google.com')) return 'google';
+        if (r.includes('naver.com')) return 'naver';
+        if (r.includes('daum.net') || r.includes('kakao.com')) return 'kakao';
+        if (r.includes('instagram.com')) return 'instagram';
+        if (r.includes('facebook.com') || r.includes('l.facebook.com')) return 'facebook';
+        if (r.includes('youtube.com')) return 'youtube';
+        if (r.includes('tiktok.com')) return 'tiktok';
+        if (r.includes('twitter.com') || r.includes('x.com')) return 'twitter';
+        if (r.includes('bing.com')) return 'bing';
+        if (r.includes('yahoo.com')) return 'yahoo';
+
+        return 'referral';
+      } catch (e) {
+        return 'unknown';
+      }
+    }
+
+    /**
+     * 신규/재방문 체크
+     * @private
+     */
+    _checkVisitorStatus() {
+      try {
+        const key = 'za_visitor';
+        const existing = localStorage.getItem(key);
+        if (!existing) {
+          localStorage.setItem(key, JSON.stringify({ first_visit: new Date().toISOString() }));
+          return true; // 신규
+        }
+        return false; // 재방문
+      } catch (e) {
+        return false;
+      }
+    }
+
+    /**
+     * 체류시간 전송 (페이지 이탈 시)
+     * @private
+     */
+    _trackDuration() {
+      if (!this.sessionStartTime || !this.trackingId) return;
+      const duration = Math.round((Date.now() - this.sessionStartTime) / 1000);
+      if (duration < 1) return;
+
+      this.sessionStartTime = null; // 중복 전송 방지
+
+      fetch(API_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tracking_id: this.trackingId,
+          event_type: 'session_end',
+          session_id: this.sessionId,
+          time_on_page: duration,
+          page_url: window.location.href,
+        }),
+        keepalive: true,
+      }).catch(() => {});
     }
 
     /**
