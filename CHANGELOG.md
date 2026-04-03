@@ -1,5 +1,46 @@
 # Changelog
 
+## [4.5.0] 2026-04-02
+
+### UX 스크롤 히트맵 구현
+
+#### 신규 기능
+
+- **HeatmapViewer 컴포넌트** (`src/views/admin/zestAnalytics/components/HeatmapViewer.jsx`)
+  - 좌측: iframe 실제 페이지 미리보기 + 투명 canvas 오버레이 (10% 구간별 COLD→HOT 색상)
+  - 우측 수직 바: 구간별 도달률 색상 슬롯 (HOT=빨강, COLD=파랑)
+  - 우측 통계: 방문자 / 페이지뷰 / 세션 수 / 도달 구간 (25/50/75/100%) / 도달률 추이 SVG 차트
+  - 상단 필터: 전체/PC/MO 탭 + 페이지 URL 드롭다운
+  - DateRangeContext 연동 (날짜 변경 시 자동 리패치)
+  - iframe 페이지 이동 감지 → 선택 URL 동기화 (same-origin 한정)
+
+- **ZestAnalytics 탭 추가** — "UX 히트맵" 탭 (대시보드 | UX 히트맵 | 추적 코드 관리)
+
+#### SDK v1.4.0
+
+| 항목 | 설명 |
+|------|------|
+| `scrollBuckets` 추가 | 10개 배열, `scrollBuckets[i] = 1` if scroll_depth >= i*10 |
+| `_trackScrollDepth()` 확장 | 스크롤마다 bucket 갱신 |
+| `_sendSessionEnd()` 확장 | `scroll_buckets`, `device_type` 추가 전송 |
+| `_resetSession()` 확장 | `scrollBuckets` 초기화 |
+
+#### Supabase 변경사항 (`수퍼베이스_DB_세팅.md` Part 9)
+
+- **`za_events` 컬럼 추가**: `scroll_buckets JSONB`
+- **RPC 함수 2개 추가**: `get_scroll_heatmap`, `get_heatmap_page_list`
+- **`za-collect-event` Edge Function 업데이트**: `scroll_buckets`, `device_type`(session_end 포함 전체 이벤트) 저장
+
+#### zaService.js 신규 함수
+
+| 함수 | 설명 |
+|------|------|
+| `getHeatmapPageList(params)` | `get_heatmap_page_list` RPC 호출, 데이터 있는 페이지 URL 목록 |
+| `getScrollHeatmap(params)` | `get_scroll_heatmap` RPC 호출, 10개 bucket 도달률 |
+| `getHeatmapPageStats(params)` | 방문자/페이지뷰/평균 도달률/구간별 도달률 요약 |
+
+---
+
 ## [4.4.0] 2026-04-02
 
 ### SDK v1.3.0 — GA 스타일 세션 추적

@@ -566,6 +566,197 @@ export const getChannelPerformance = async ({
   }
 };
 
+// ============================================================================
+// UX 스크롤 히트맵
+// ============================================================================
+
+/**
+ * 히트맵용 페이지 URL 목록 (session_end 데이터 있는 페이지)
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {Array<string>} params.availableAdvertiserIds
+ * @param {string} params.startDate - YYYY-MM-DD
+ * @param {string} params.endDate   - YYYY-MM-DD
+ * @param {string|null} params.deviceType - 'desktop'|'mobile'|'tablet'|null(전체)
+ * @returns {Promise<Array<{page_url, session_count, avg_depth}>>}
+ */
+export const getHeatmapPageList = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+  deviceType = null,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const { data, error } = await supabase.rpc('get_heatmap_page_list', {
+      p_advertiser_ids: ids,
+      p_start: `${startDate}T00:00:00+09:00`,
+      p_end: `${endDate}T23:59:59+09:00`,
+      p_device_type: deviceType,
+    });
+
+    if (error) throw error;
+    return (data || []).map((row) => ({
+      ...row,
+      session_count: Number(row.session_count),
+      avg_depth: Number(row.avg_depth),
+    }));
+  } catch (error) {
+    console.error('[ZA Service] getHeatmapPageList error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 특정 페이지의 히트맵 데이터 (10개 구간별 도달 세션 수)
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {Array<string>} params.availableAdvertiserIds
+ * @param {string} params.pageUrl - 조회할 페이지 URL
+ * @param {string} params.startDate - YYYY-MM-DD
+ * @param {string} params.endDate   - YYYY-MM-DD
+ * @param {string|null} params.deviceType - 'desktop'|'mobile'|'tablet'|null(전체)
+ * @returns {Promise<Array<{bucket_index, reached_count, total_count, reach_pct}>>} 10개 항목
+ */
+export const getScrollHeatmap = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  pageUrl,
+  startDate,
+  endDate,
+  deviceType = null,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0 || !pageUrl) {
+      return Array.from({ length: 10 }, (_, i) => ({
+        bucket_index: i,
+        reached_count: 0,
+        total_count: 0,
+        reach_pct: 0,
+      }));
+    }
+
+    const { data, error } = await supabase.rpc('get_scroll_heatmap', {
+      p_advertiser_ids: ids,
+      p_page_url: pageUrl,
+      p_start: `${startDate}T00:00:00+09:00`,
+      p_end: `${endDate}T23:59:59+09:00`,
+      p_device_type: deviceType,
+    });
+
+    if (error) throw error;
+
+    // 결과를 10개 배열로 정규화
+    const result = Array.from({ length: 10 }, (_, i) => ({
+      bucket_index: i,
+      reached_count: 0,
+      total_count: 0,
+      reach_pct: 0,
+    }));
+
+    (data || []).forEach(({ bucket_index, reached_count, total_count }) => {
+      const idx = Number(bucket_index);
+      if (idx >= 0 && idx < 10) {
+        result[idx].reached_count = Number(reached_count);
+        result[idx].total_count = Number(total_count);
+        result[idx].reach_pct =
+          total_count > 0 ? Math.round((reached_count / total_count) * 100) : 0;
+      }
+    });
+
+    return result;
+  } catch (error) {
+    console.error('[ZA Service] getScrollHeatmap error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 특정 페이지의 히트맵 통계 요약 (방문자, 페이지뷰, 평균 도달률, 구간별 도달률)
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {Array<string>} params.availableAdvertiserIds
+ * @param {string} params.pageUrl
+ * @param {string} params.startDate
+ * @param {string} params.endDate
+ * @param {string|null} params.deviceType
+ * @returns {Promise<{visitors, pageviews, avgScrollDepth, reach25, reach50, reach75, reach100}>}
+ */
+export const getHeatmapPageStats = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  pageUrl,
+  startDate,
+  endDate,
+  deviceType = null,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0 || !pageUrl) {
+      return { visitors: 0, pageviews: 0, avgScrollDepth: 0, reach25: 0, reach50: 0, reach75: 0, reach100: 0 };
+    }
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs   = `${endDate}T23:59:59+09:00`;
+
+    // 페이지뷰 + 방문자
+    let pvQuery = supabase
+      .from('za_events')
+      .select('visitor_id')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .eq('page_url', pageUrl)
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+    if (deviceType) pvQuery = pvQuery.eq('device_type', deviceType);
+
+    // 스크롤 통계 (session_end)
+    let seQuery = supabase
+      .from('za_events')
+      .select('scroll_depth')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'session_end')
+      .eq('page_url', pageUrl)
+      .not('scroll_depth', 'is', null)
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+    if (deviceType) seQuery = seQuery.eq('device_type', deviceType);
+
+    const [pvResult, seResult] = await Promise.all([pvQuery, seQuery]);
+
+    if (pvResult.error) throw pvResult.error;
+    if (seResult.error) throw seResult.error;
+
+    const pvData = pvResult.data || [];
+    const seData = seResult.data || [];
+
+    const uniqueVisitors = new Set(pvData.map((r) => r.visitor_id).filter(Boolean)).size;
+    const avgDepth =
+      seData.length > 0
+        ? Math.round(seData.reduce((s, r) => s + r.scroll_depth, 0) / seData.length)
+        : 0;
+    const total = seData.length;
+
+    return {
+      visitors: uniqueVisitors,
+      pageviews: pvData.length,
+      avgScrollDepth: avgDepth,
+      reach25: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 25).length / total) * 100) : 0,
+      reach50: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 50).length / total) * 100) : 0,
+      reach75: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 75).length / total) * 100) : 0,
+      reach100: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 100).length / total) * 100) : 0,
+      totalSessions: total,
+    };
+  } catch (error) {
+    console.error('[ZA Service] getHeatmapPageStats error:', error);
+    throw error;
+  }
+};
+
 /**
  * 일별 이벤트 통계 (테이블용)
  * @param {object} params - 조회 파라미터

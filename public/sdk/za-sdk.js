@@ -16,7 +16,7 @@
 (function (window) {
   'use strict';
 
-  const SDK_VERSION = '1.2.0';
+  const SDK_VERSION = '1.4.0';
 
   // API 엔드포인트 (실제 배포 시 변경 필요)
   const API_ENDPOINT =
@@ -40,6 +40,9 @@
       this.visitorId = this._getOrCreateVisitorId();
       this.isNewVisitor = false;
       this.maxScrollDepth = 0;
+      // scroll_buckets: 10개 배열, index i = 사용자가 (i*10)% 이상 스크롤했으면 1
+      // [0]=0%이상, [1]=10%이상, ..., [9]=90%이상
+      this.scrollBuckets = new Array(10).fill(0);
       // GA 스타일 세션 추적
       this.activeStartTime = null;   // 현재 활성 구간 시작 시각
       this.accumulatedTime = 0;      // 누적 활성 시간 (초)
@@ -171,6 +174,16 @@
       };
 
       this._sendEvent(payload);
+
+      // 히트맵 뷰어(부모 프레임)에 페이지 전환 알림
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(
+            { type: 'za_pageview', page_url: window.location.href },
+            '*'
+          );
+        }
+      } catch (e) {}
     }
 
     /**
@@ -472,6 +485,12 @@
       if (depth > this.maxScrollDepth) {
         this.maxScrollDepth = depth;
       }
+      // scroll_buckets 갱신: bucket[i] = 1 if scroll_depth >= i * 10
+      for (let i = 0; i < 10; i++) {
+        if (depth >= i * 10) {
+          this.scrollBuckets[i] = 1;
+        }
+      }
     }
 
     /**
@@ -549,6 +568,7 @@
     _sendSessionEnd() {
       if (!this.trackingId || this.accumulatedTime < this.MIN_SESSION_DURATION) return;
 
+      const deviceInfo = this._getDeviceInfo();
       fetch(API_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -559,7 +579,9 @@
           time_on_page: this.accumulatedTime,
           page_url: window.location.href,
           scroll_depth: this.maxScrollDepth,
+          scroll_buckets: this.scrollBuckets,
           channel: this._detectChannel(),
+          device_type: deviceInfo.device_type,
         }),
         keepalive: true,
       }).catch(() => {});
@@ -574,6 +596,7 @@
       this.accumulatedTime = 0;
       this.activeStartTime = null;
       this.maxScrollDepth = 0;
+      this.scrollBuckets = new Array(10).fill(0);
       this.idleTimer = null;
     }
 

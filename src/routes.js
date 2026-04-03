@@ -10,6 +10,7 @@ import {
   MdTrackChanges,
   MdSecurity,
   MdBusiness,
+  MdOutlineWaterDrop,
 } from 'react-icons/md';
 
 // Admin Imports
@@ -18,6 +19,7 @@ import NFTMarketplace from 'views/admin/marketplace';
 import Profile from 'views/admin/profile';
 import DataTables from 'views/admin/dataTables';
 import ZestAnalytics from 'views/admin/zestAnalytics';
+import Heatmap from 'views/admin/heatmap';
 
 // SuperAdmin Imports
 import SuperAdminDashboard from 'views/superadmin/default';
@@ -93,6 +95,13 @@ const routes = [
     path: '/zest-analytics',
     icon: <Icon as={MdTrackChanges} width="20px" height="20px" color="inherit" />,
     component: <ZestAnalytics />,
+  },
+  {
+    name: 'UX 히트맵',
+    layout: '/admin',
+    path: '/heatmap',
+    icon: <Icon as={MdOutlineWaterDrop} width="20px" height="20px" color="inherit" />,
+    component: <Heatmap />,
   },
   {
     name: 'Sign In',
