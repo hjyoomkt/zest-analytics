@@ -45,6 +45,8 @@ src/
 │                            4개 레이아웃: AuthLayout / AdminLayout / SuperAdminLayout / ClientAdminLayout
 │                            RoleBasedRedirect: master/agency → /superadmin, advertiser → /clientadmin
 ├── routes.js                메인 라우트 정의 (Auth, Admin 진입점 + SuperAdmin/ClientAdmin 사이드바 아이콘)
+│                            Admin 라우트(사이드바 순서): /default, /zest-analytics, /traffic-source, /heatmap, /profile
+│                            Admin 라우트(숨김): /data-tables (hidden: true, URL 직접 접근만 가능)
 ├── superadminRoutes.js      SuperAdmin 하위 라우트 (default, advertisers, brands, users)
 └── clientAdminRoutes.js     ClientAdmin 하위 라우트 (default, users, brands)
 ```
@@ -80,7 +82,12 @@ src/components/
 ├── dataDispaly/TimelineRow.js       타임라인 이벤트 표시
 ├── fields/
 │   ├── InputField.js                커스텀 입력 필드
-│   └── SwitchField.js               토글 스위치
+│   ├── SwitchField.js               토글 스위치
+│   └── DateRangePicker.js           날짜 범위 선택기 (react-calendar 기반)
+│                                    - start/end date 입력 + 캘린더 팝오버
+│                                    - 프리셋 드롭다운 (직접설정/어제/최근7일/최근14일/최근30일/이번주/지난주/이번달/지난달)
+│                                    - 비교 모드 토글
+│                                    - DateRangeContext 연동
 ├── fixedPlugin/FixedPlugin.js       플로팅 플러그인 패널
 ├── footer/
 │   ├── FooterAdmin.js               어드민 섹션 푸터
@@ -108,6 +115,16 @@ src/components/
         ├── Content.js               사이드바 메뉴 내용
         ├── Links.js                 내비게이션 링크
         └── SidebarCard.js           사이드바 내 프로모션 카드
+```
+
+### 훅 `src/hooks/`
+
+```
+src/hooks/
+└── useStableFetch.js    JSON.stringify 기반 안정적 데이터 패치 훅
+                         - deps를 직렬화하여 이전 값과 비교 → 동일하면 패치 스킵
+                         - 탭 전환 시 Supabase 세션 갱신으로 배열 참조가 바뀌어도 리패치 방지
+                         - useEffect deps 대신 이 훅 사용 → 불필요한 리렌더링/API 중복 호출 제거
 ```
 
 ### 컨텍스트 `src/contexts/`
@@ -204,12 +221,28 @@ src/views/
 │           └── BrandCard.jsx            브랜드 정보 카드
 │
 ├── admin/
-│   ├── default/                         메인 대시보드 페이지
-│   │   ├── index.jsx
+│   ├── default/                         메인 대시보드 페이지 (/admin/default)
+│   │   ├── index.jsx                    DateRangePicker + 6 KPI 카드 + 차트/테이블 섹션 통합
+│   │   │                                KPI: 방문자수 / 방문자당 페이지뷰 / 평균 체류시간 / 평균 스크롤 깊이 / 신규방문 / 재방문
+│   │   │                                AuthContext(브랜드 선택) + DateRangeContext 연동
 │   │   ├── components/
-│   │   │   ├── CheckTable.js / ComplexTable.js / DailyTraffic.js
-│   │   │   ├── PieCard.js / Tasks.js / TotalSpent.js
-│   │   │   ├── UserActivity.js / WeeklyRevenue.js
+│   │   │   ├── VisitorTrendChart.jsx    일별 방문자 & 페이지뷰 이중 라인 차트 (ApexCharts)
+│   │   │   │                            getDailyVisitorTrend() 사용
+│   │   │   ├── DeviceStatsChart.jsx     기기별 통계 도넛 차트 (PC/모바일/태블릿/기타)
+│   │   │   │                            getDeviceStats() 사용
+│   │   │   ├── VisitorTypeChart.jsx     신규/재방문 비율 도넛 차트
+│   │   │   │                            getVisitorTypeStats() 사용
+│   │   │   ├── TopPages.jsx             페이지별 방문 순위 (프로그레스바 게이지)
+│   │   │   │                            getTopPages() 사용, limit=10
+│   │   │   ├── BehaviorRates.jsx        이탈률/새로고침률/뒤로가기율 MiniStatistics 3개
+│   │   │   │                            getBehaviorRates() 사용 (현재 새로고침/뒤로가기는 SDK 미지원으로 0)
+│   │   │   ├── TopActions.jsx           자주 하는 행동 Top10 (이벤트 타입 배지 + 라벨 + 횟수)
+│   │   │   │                            getTopActions() 사용, event_type 배지 매핑
+│   │   │   ├── TopReferrers.jsx         유입경로 Top5 도넛 차트 + 목록 (비율 % + 건수)
+│   │   │   │                            getTopReferrers() 사용, channel 우선 → page_referrer 파싱
+│   │   │   └── OsBrowserStats.jsx       OS / 브라우저별 통계 (프로그레스바)
+│   │   │                                getOsStats() + getBrowserStats() 병렬 호출
+│   │   │                                항목별 이벤트 수 + 사용자 수(visitor_id 중복 제거) 동시 표시
 │   │   └── variables/
 │   │       ├── columnsData.js / tableDataCheck.json / tableDataComplex.json
 │   │
@@ -250,38 +283,96 @@ src/views/
 │   │   └── variables/
 │   │       ├── columnsData.js / tableData*.json (4개)
 │   │
+│   ├── trafficSource/                   유입 경로 분석 페이지 (/admin/traffic-source)
+│   │   ├── index.jsx                    메인 페이지. 차트↔테이블 선택 소스 상태 공유. Ctrl/Cmd+클릭 다중 비교 선택
+│   │   └── components/
+│   │       ├── ReferrerChart.jsx        시간대별(0~23시) 유입 소스별 라인 차트 (ApexCharts)
+│   │       │                            - 지표 드롭다운: DateRangePicker 스타일 Menu/MenuItem (8개 지표)
+│   │       │                            - 선택 소스 칩(Tag) 상단 표시, X로 제거
+│   │       │                            - 모듈 레벨 캐시로 탭 전환 시 깜빡임 방지
+│   │       └── ReferrerTable.jsx        유입 소스(referrer 도메인)별 전환 지표 테이블
+│   │                                    - 열 선택: /superadmin/users 브랜드 선택 HStack 커스텀 체크박스 디자인
+│   │                                    - 열 저장: localStorage(traffic_source_visible_cols)
+│   │                                    - 기본 지표 9개 + 추가 지표 5개 (zest-analytics 지표 포함)
+│   │                                    - 합계 행 자동 계산 / 행 클릭 → 차트 소스 선택 연동
+│   │                                    - 정렬, 모듈 레벨 캐시 적용
+│   │
+│   ├── heatmap/                         UX 스크롤 히트맵 페이지 (독립 페이지, /admin/heatmap)
+│   │   └── index.jsx                    HeatmapViewer를 감싸는 페이지 컴포넌트
+│   │                                    useAuth() → currentAdvertiserId / availableAdvertiserIds 주입
+│   │
 │   └── zestAnalytics/                   Zest Analytics 전환 추적 분석 페이지
-│       ├── ZestAnalytics.jsx            메인 페이지 (대시보드 / 추적코드 관리 탭)
+│       ├── ZestAnalytics.jsx            메인 페이지 (KPI 카드 + 채널 분석 테이블 단일 뷰)
+│       │                                추적코드 관리는 superadmin/clientadmin 어드민 패널에서 담당
 │       ├── index.js                     모듈 진입점
 │       ├── components/
-│       │   ├── EventStatistics.jsx      이벤트 KPI 카드 + 어트리뷰션 요약
-│       │   ├── AttributionAnalysis.jsx  어트리뷰션 윈도우별 분석 (1일/7일/28일)
-│       │   ├── CampaignPerformance.jsx  캠페인별 성과 테이블
-│       │   └── TrackingCodeManager.jsx  추적 코드 생성/재생성/삭제/설치 가이드
-│       │                                props: advertiserId, role
-│       │                                       availableAdvertisers, selectedBrandId, onBrandChange (슈퍼어드민용 브랜드 선택 내장)
-│       │                                설치 가이드 모달: 7개 탭 (기본설치/구매/회원가입/리드/장바구니/커스텀/UTM)
-│       │                                                  Horizon UI pill 탭 + 다크 코드 블록 + 복사 버튼
+│       │   ├── EventStatistics.jsx      이벤트 KPI 카드 (총이벤트/구매/회원가입/매출 등)
+│       │   ├── ChannelAnalytics.jsx     GA 스타일 채널 분석 테이블
+│       │   │                            - 채널·소스·미디엄·캠페인 고정 컬럼 + 지표 컬럼
+│       │   │                            - 채널 아이콘 자동 매핑 (Meta/Google/네이버/카카오 등)
+│       │   │                            - 열 선택 Popover로 지표 12개 on/off
+│       │   │                            - 컬럼 헤더 클릭 정렬 / 탭 전환 캐시(깜빡임 방지)
+│       │   ├── AttributionAnalysis.jsx  어트리뷰션 윈도우별 분석 (1일/7일/28일) ※ 현재 미사용
+│       │   ├── CampaignPerformance.jsx  캠페인별 성과 테이블 ※ 현재 미사용
+│       │   ├── TrackingCodeManager.jsx  추적 코드 생성/재생성/삭제/설치 가이드
+│       │   │                            props: advertiserId, role
+│       │   │                                   availableAdvertisers, selectedBrandId, onBrandChange (슈퍼어드민용 브랜드 선택 내장)
+│       │   │                            설치 가이드 모달: 7개 탭 (기본설치/구매/회원가입/리드/장바구니/커스텀/UTM)
+│       │   │                                              Horizon UI pill 탭 + 다크 코드 블록 + 복사 버튼
+│       │   └── HeatmapViewer.jsx        UX 스크롤 히트맵 뷰어
+│       │                                - 자체 날짜 상태 (기본: 오늘, DateRangeContext 미사용)
+│       │                                - 디바이스 탭: 전체/PC/MO
+│       │                                - iframe 실제 페이지 미리보기 + 우측 56px 수직 컬러 바
+│       │                                - 우측 통계: 방문자/페이지뷰/평균 도달률/세션 수 + 도달 구간 + SVG 추이 차트
+│       │                                - iframe 페이지 이동 감지: SDK postMessage(za_pageview) 수신
 │       ├── services/
 │       │   └── zaService.js             Supabase API 호출 (za_tracking_codes, za_events)
-│       │                                ── 기존 ──
+│       │                                ── 추적 코드 관리 ──
 │       │                                - getTrackingCodes / createTrackingCode / regenerateTrackingCode
+│       │                                - updateTrackingCodeStatus / deleteTrackingCode
+│       │                                ── 이벤트 통계 ──
 │       │                                - getEventStatistics / getAttributionStats / getCampaignPerformance
 │       │                                - getRecentEvents / getDailyEventStats
-│       │                                ── 신규 (트래픽 분석) ──
+│       │                                ── 채널 분석 ──
+│       │                                - getUTMBreakdown → channel+source+medium+campaign 조합 그룹화
+│       │                                  사용자수/페이지뷰/체류시간/도달률/구매/매출/회원가입 등 일괄 집계
+│       │                                ── 트래픽 분석 ──
 │       │                                - getHourlyVisitors → get_hourly_visitors RPC (visitor_id 기준 고유 방문자)
 │       │                                - getHourlyPageViews → get_hourly_pageviews RPC
 │       │                                - getPageScrollStats → get_page_scroll_stats RPC (25/50/75/100% 도달률)
 │       │                                - getChannelPerformance → get_channel_performance RPC (채널별 종합 성과)
+│       │                                ── UX 히트맵 ──
+│       │                                - getHeatmapPageList → get_heatmap_page_list RPC (데이터 있는 페이지 URL 목록)
+│       │                                - getScrollHeatmap → get_scroll_heatmap RPC (10개 bucket 도달률)
+│       │                                - getHeatmapPageStats → za_events 직접 쿼리 (방문자/페이지뷰/도달률 요약)
+│       │                                ── 메인 대시보드 ──
+│       │                                - getDashboardKPIs → za_events 직접 쿼리
+│       │                                  방문자수/방문자당PV/평균체류시간/평균스크롤깊이/신규방문/재방문
+│       │                                - getDailyVisitorTrend → KST 날짜별 방문자+페이지뷰 집계
+│       │                                - getDeviceStats → device_type별 pageview 집계
+│       │                                - getVisitorTypeStats → session_end.is_new_visitor (pageview fallback)
+│       │                                - getTopPages → page_url별 pageview + unique_visitors
+│       │                                - getBehaviorRates → 이탈/새로고침/뒤로가기율 (새로고침·뒤로가기 SDK 미지원으로 0)
+│       │                                - getTopActions → event_type/page_url/scroll_depth/event_name 기준 상위 행동
+│       │                                - getTopReferrers → channel 우선, 없으면 page_referrer 파싱하여 hostname 추출
+│       │                                - getOsStats → pageview 이벤트에서 os 컬럼 집계 (이벤트 수 + visitor_id 고유 사용자 수)
+│       │                                - getBrowserStats → pageview 이벤트에서 browser 컬럼 집계 (이벤트 수 + 고유 사용자 수)
+│       │                                - getReferrerBreakdown → referrer 도메인별 방문·전환 성과 집계 (3-pass: pageview→session_end→전환 귀속)
+│       │                                  반환: source, lastUtmChannel, totalVisits, visitors, pageviews, signups, memberConversionRate,
+│       │                                        purchasers, purchaseCount, revenue, purchaseConversionRate, avgOrderValue 등 16개 지표
+│       │                                - getReferrerHourlyData → referrer별 시간대(0~23시) 지표 배열 반환 (KST 기준)
+│       │                                  반환: { [referrer]: { totalVisits, visitors, signups, purchasers, purchaseCount, revenue,
+│       │                                          purchaseConversionRate, avgOrderValue } } 각 24-element 배열
 │       └── sdk/
-│           ├── index.js                 광고주 웹사이트용 JS SDK v1.3.0 (IIFE, window.zestAnalytics)
+│           ├── index.js                 광고주 웹사이트용 JS SDK v1.4.0 (IIFE, window.zestAnalytics)
 │           │                            - init() → 페이지뷰 자동 추적, GA 스타일 세션 추적 리스너 등록
 │           │                            - trackPageView() → channel / is_new_visitor / session_id / visitor_id / device 포함
+│           │                                              + window.parent.postMessage(za_pageview) 전송 (iframe 감지용)
 │           │                            - track(eventType, data) → 전환 이벤트
 │           │                            - _detectChannel() → UTM 우선(28일 윈도우 체크), referrer 분석
 │           │                            - _checkVisitorStatus() → localStorage za_visitor 기반 신규/재방문
 │           │                            - _getOrCreateVisitorId() → localStorage za_vid 기반 브라우저별 고유 방문자 ID
-│           │                            - _trackScrollDepth() → scroll 이벤트로 maxScrollDepth(0~100) 실시간 갱신
+│           │                            - _trackScrollDepth() → scroll 이벤트로 maxScrollDepth + scrollBuckets(10개) 갱신
 │           │                            ── GA 스타일 세션 추적 ──
 │           │                            - _onInteraction() → 상호작용 감지(8종), idle 타이머 리셋
 │           │                            - _resetIdleTimer() → 30분 무활동 타이머 리셋
@@ -290,7 +381,8 @@ src/views/
 │           │                            - _resumeSession() → 탭 visible 시 타이머 재시작
 │           │                            - _endSession() → beforeunload 시 최종 누적 후 전송
 │           │                            - _sendSessionEnd() → fetch keepalive, 3초 미만 노이즈 필터
-│           │                            - _resetSession() → 새 sessionId 발급, 누적값 초기화
+│           │                                                  scroll_buckets(10개 배열) + device_type 전송
+│           │                            - _resetSession() → 새 sessionId 발급, 누적값·scrollBuckets 초기화
 │           │                            SDK URL: https://analytics.zestdot.com/sdk/za-sdk.js
 │           └── build.js                 SDK를 public/sdk/za-sdk.js로 복사하는 빌드 스크립트
 │                                        실행: node src/views/admin/zestAnalytics/sdk/build.js
@@ -398,6 +490,11 @@ src/assets/
 | 2026-04-02 | SDK v1.2.0 — 스크롤 도달률 추적, visitor_id 도입, 채널 어트리뷰션 윈도우 버그 수정 | `CHANGELOG.md` |
 | 2026-04-02 | za-collect-event Edge Function 재배포 — scroll_depth, visitor_id, channel(session_end) 처리 추가 | `za-collect-event.ts` |
 | 2026-04-02 | SDK v1.3.0 — GA 스타일 세션 추적 (탭 전환 일시정지/재개, 30분 idle timeout, 3초 노이즈 필터, 8종 상호작용 감지) | `CHANGELOG.md` |
+| 2026-04-02 | UX 스크롤 히트맵 구현 — SDK v1.4.0(scroll_buckets/postMessage), HeatmapViewer, `/admin/heatmap` 독립 페이지, Part 9 DB | `수퍼베이스_DB_세팅.md` Part 9 |
+| 2026-04-03 | UX 히트맵 정상 작동 확인 — analytics.zestdot.com에서 실데이터 표시(방문자/페이지뷰/도달률/세션) 확인 | - |
+| 2026-04-05 | `/admin/default` 메인 대시보드 전면 구현 — 6 KPI 카드, 7개 차트/테이블 컴포넌트, DateRangePicker, useStableFetch 훅 | `CHANGELOG.md` v4.6.0 |
+| 2026-04-05 | za_events 실제 스키마 확인 — page_referrer(not referrer), channel, is_new_visitor, scroll_depth, visitor_id, session_id, time_on_page 존재 확인; element_text 부재 확인 | `수퍼베이스_DB_세팅.md` Part 10 |
+| 2026-04-05 | OS/브라우저 통계 추가 — OsBrowserStats.jsx, getOsStats/getBrowserStats (이벤트 수 + 고유 사용자 수 동시 표시) | `CHANGELOG.md` v4.6.1 |
 
 ### 어드민 시스템 이식 상세 (2026-03-31)
 
@@ -453,13 +550,14 @@ src/assets/
 |------|------|
 | `src/utils/dateUtils.js` | KST 날짜 유틸리티 (DateRangeContext 의존) |
 | `src/contexts/DateRangeContext.js` | 날짜 범위 전역 상태 (useDateRange 훅) |
-| `src/views/admin/zestAnalytics/ZestAnalytics.jsx` | 메인 페이지 |
+| `src/views/admin/zestAnalytics/ZestAnalytics.jsx` | 메인 페이지 (KPI 카드 + ChannelAnalytics 단일 뷰) |
 | `src/views/admin/zestAnalytics/index.js` | 모듈 진입점 |
 | `src/views/admin/zestAnalytics/services/zaService.js` | Supabase API 서비스 |
 | `src/views/admin/zestAnalytics/components/EventStatistics.jsx` | KPI 카드 |
-| `src/views/admin/zestAnalytics/components/AttributionAnalysis.jsx` | 어트리뷰션 분석 |
-| `src/views/admin/zestAnalytics/components/CampaignPerformance.jsx` | 캠페인 성과 테이블 |
-| `src/views/admin/zestAnalytics/components/TrackingCodeManager.jsx` | 추적 코드 관리 |
+| `src/views/admin/zestAnalytics/components/ChannelAnalytics.jsx` | GA 스타일 채널·소스·미디엄·캠페인 분석 테이블 (열 선택, 정렬, 캐시) |
+| `src/views/admin/zestAnalytics/components/AttributionAnalysis.jsx` | 어트리뷰션 분석 ※ 미사용 |
+| `src/views/admin/zestAnalytics/components/CampaignPerformance.jsx` | 캠페인 성과 테이블 ※ 미사용 |
+| `src/views/admin/zestAnalytics/components/TrackingCodeManager.jsx` | 추적 코드 관리 (superadmin/clientadmin에서 사용) |
 | `src/views/admin/zestAnalytics/sdk/index.js` | 광고주용 JS SDK |
 | `src/views/admin/zestAnalytics/sdk/build.js` | SDK 빌드 스크립트 |
 

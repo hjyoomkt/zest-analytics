@@ -1,29 +1,242 @@
 # Changelog
 
-## [4.5.0] 2026-04-02
+## [4.6.5] 2026-04-06
+
+### routes.js — 사이드바 순서 변경 및 Data Tables 숨김 처리
+
+- `/admin/data-tables` 라우트에 `hidden: true` 추가 → 사이드바 미노출 (URL 직접 접근은 유지)
+- 사이드바 메뉴 노출 순서 변경: 홈 → 제스트애널리틱스 → 유입경로분석 → UX히트맵 → 슈퍼어드민 → 브랜드어드민 → 프로필
+
+---
+
+## [4.6.4] 2026-04-06
+
+### /admin/traffic-source — 유입 경로 분석 페이지 신규 추가
+
+#### 신규 파일
+
+| 파일 | 설명 |
+|------|------|
+| `src/views/admin/trafficSource/index.jsx` | 메인 페이지. 차트↔테이블 선택 소스 상태 공유. Ctrl/Cmd+클릭 비교 선택 핸들러 |
+| `src/views/admin/trafficSource/components/ReferrerChart.jsx` | 시간대별(0~23시) 방문자 라인 차트. 소스 칩(tag) 표시 + X 제거. 지표 드롭다운은 DateRangePicker 스타일(Menu/MenuItem) 적용 |
+| `src/views/admin/trafficSource/components/ReferrerTable.jsx` | 유입 소스별 전환 지표 테이블. 열 선택은 `/superadmin/users` 브랜드 선택 HStack 커스텀 체크박스 디자인 적용. 열 저장(localStorage). 합계 행 자동 계산. 행 클릭 → 차트 연동 |
+
+#### zaService.js 신규 함수
+
+| 함수 | 설명 |
+|------|------|
+| `getReferrerBreakdown(params)` | page_referrer 도메인 기준으로 그룹화. pageview 세션→referrer 매핑 후 signup/purchase 귀속. 반환 메트릭: source, lastUtmChannel, totalVisits, visitors, pageviews, avgTimeOnPage, avgScrollDepth, signups, memberConversionRate, purchasers, purchaseCount, revenue, purchaseConversionRate, avgOrderValue, addToCarts, leads |
+| `getReferrerHourlyData(params)` | 한 번 조회로 전 지표 반환. pageview + signup + purchase 이벤트 조합. referrer별·시간대별 totalVisits/visitors/signups/purchasers/purchaseCount/revenue/purchaseConversionRate/avgOrderValue 배열(24개) 반환. 모듈 레벨 캐시 적용 |
+
+#### 차트 지표 목록 (8개)
+- 전체 페이지뷰수 / 방문자수 / 회원 전환 수 / 구매자수 / 구매량 / 총 구매금액 / 구매 전환율 / 평균 주문 금액
+
+#### 테이블 지표 컬럼
+- 기본(9개): 전체 페이지뷰수, 방문자 수, 회원 전환 수, 회원 전환율, 구매지 수, 구매량, 총 구매 금액, 구매 전환율, 평균 주문 금액
+- 추가(5개): 페이지뷰수, 평균 체류시간, 평균 도달률, 장바구니담기, 리드
+
+#### routes.js 변경
+- `/admin/traffic-source` 라우트 추가 (`MdCallSplit` 아이콘, 사이드바 노출)
+
+---
+
+### /admin/zest-analytics — ChannelAnalytics 개선
+
+#### 열 선택 디자인 변경
+- `Checkbox` 컴포넌트 → `/superadmin/users` 브랜드 선택 HStack 커스텀 체크박스 디자인으로 교체
+- 선택 항목: `brand.500` 테두리 + `brand.50` 배경 + 내부 흰 사각형 표시
+- 취소 / 저장 버튼 분리 (draft 패턴: Popover 열기 시 draft 생성, 저장 시 적용)
+
+#### 열 저장 기능 추가
+- 헤더 "열 저장" 버튼: 현재 적용 컬럼을 `localStorage(channel_analytics_visible_cols)`에 즉시 저장
+- Popover 내 "저장" 버튼: draft 적용 + localStorage 저장 + Popover 닫기
+- 페이지 재진입 시 저장된 열 설정 자동 복원
+
+---
+
+## [4.6.3] 2026-04-05
+
+### /admin/zest-analytics — GA 스타일 채널 분석 테이블 전면 개편
+
+#### 신규 컴포넌트
+
+| 파일 | 설명 |
+|------|------|
+| `src/views/admin/zestAnalytics/components/ChannelAnalytics.jsx` | 채널·소스·미디엄·캠페인을 한 행의 컬럼으로 나란히 표시하는 GA 스타일 분석 테이블. 채널 아이콘(Meta/Google/네이버/카카오 등) 자동 매핑. 정렬, 열 선택 기능 포함 |
+
+#### zaService.js 신규 함수
+
+| 함수 | 설명 |
+|------|------|
+| `getUTMBreakdown(params)` | `channel + utm_source + utm_medium + utm_campaign` 조합으로 그룹화. 2-패스 처리로 session_end 체류시간/스크롤을 세션 매핑으로 정확히 연결. 반환 메트릭: users, pageviews, avgPageviewsPerUser, avgTimeOnPage, avgScrollDepth, purchases, revenue, addToCarts, signups, leads, memberConversionRate, purchaseConversionRate |
+
+#### ZestAnalytics.jsx 변경
+
+- 기존 2탭 구조(대시보드 / 추적코드 관리) 제거
+- 추적코드 관리: superadmin/clientadmin 어드민 패널에서 관리하므로 해당 탭 삭제
+- `AttributionAnalysis`, `CampaignPerformance` 컴포넌트 제거
+- 페이지 구조: EventStatistics KPI 카드 → ChannelAnalytics 테이블 (단일 뷰)
+
+#### ChannelAnalytics 기능 상세
+
+**차원 컬럼 (고정)**
+- 채널: 플랫폼 아이콘(FaFacebook/FaInstagram/FaYoutube/FaTwitter) + 텍스트 레이블 자동 매핑
+- 소스 / 미디엄 / 캠페인
+
+**지표 컬럼 (열 선택으로 on/off)**
+- 기본 표시: 사용자수, 페이지뷰수, 평균 체류시간, 구매, 구매전환액수, 회원가입
+- 선택 추가: 평균 페이지뷰, 평균 도달률, 구매전환율, 장바구니담기, 회원전환율, 리드
+
+**UX**
+- 컬럼 헤더 클릭 → 오름/내림차순 정렬 토글, 정렬 중인 열 파란색 강조
+- 탭 이동 후 복귀 시 깜빡임 방지: 모듈 레벨 캐시(_cache)로 이전 데이터 즉시 표시, 스피너는 첫 요청 시만 노출
+- Card `overflow:hidden` 제거 + Popover `strategy="fixed"` 적용으로 열선택 팝오버 클리핑 문제 해결
+
+---
+
+## [4.6.2] 2026-04-05
+
+### 한글 URL percent-encoding 디코딩 처리
+
+한글이 포함된 페이지 URL이 `%ED%95%9C%EA%B8%80` 형태로 표시되던 문제 수정.
+`window.location.href`가 한글 경로를 percent-encoding으로 저장하므로, 표시 시점에 `decodeURIComponent`로 디코딩하도록 변경.
+DB에 저장된 값 및 쿼리 조건은 원본(encoded) 그대로 유지.
+
+#### 수정된 파일
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `src/views/admin/default/components/TopPages.jsx` | `decodeUrl()` 헬퍼 추가, URL 표시(title + 텍스트) 시 디코딩 적용 |
+| `src/views/admin/zestAnalytics/components/HeatmapViewer.jsx` | 페이지 드롭다운 option 텍스트 디코딩 (value는 DB 쿼리용 원본 유지) |
+| `src/views/admin/zestAnalytics/services/zaService.js` | `getTopActions()`의 label 생성 시 URL 디코딩 적용 |
+
+---
+
+## [4.6.1] 2026-04-05
+
+### OS / 브라우저 통계 추가
+
+#### 신규 컴포넌트
+
+| 파일 | 설명 |
+|------|------|
+| `src/views/admin/default/components/OsBrowserStats.jsx` | OS / 브라우저별 방문 통계 카드. 운영체제·브라우저 섹션 각각 프로그레스바 표시. 항목별 **이벤트 수** + **고유 사용자 수**(visitor_id 중복 제거) 동시 표시. 비율(%)은 이벤트 수 기준 |
+
+#### zaService.js 신규 함수
+
+| 함수 | 설명 |
+|------|------|
+| `getOsStats(params)` | pageview 이벤트에서 `os` 컬럼 집계 → `[{os, events, users}]`. visitor_id 기준 고유 사용자 수 포함 |
+| `getBrowserStats(params)` | pageview 이벤트에서 `browser` 컬럼 집계 → `[{browser, events, users}]`. visitor_id 기준 고유 사용자 수 포함 |
+
+#### 수정된 파일
+
+- **`src/views/admin/default/index.jsx`** — 기기통계+방문유형 그리드에 `OsBrowserStats` 추가 (2열 → 3열)
+- **`za-collect-event.ts`** — 기존부터 `browser`/`os` 저장 중 (line 100-101, 변경 없음)
+- **SDK `index.js`** — `trackPageView`에서 `...this._getDeviceInfo()`로 `browser`/`os` 이미 전송 중 (변경 없음)
+
+#### za_events 컬럼 요구사항
+
+`browser`, `os` 컬럼이 없는 경우 아래 SQL 실행 필요:
+```sql
+ALTER TABLE za_events
+  ADD COLUMN IF NOT EXISTS browser TEXT,
+  ADD COLUMN IF NOT EXISTS os TEXT;
+```
+
+---
+
+## [4.6.0] 2026-04-05
+
+### /admin/default 메인 대시보드 — 실제 데이터 연동 및 섹션 추가
+
+#### 신규 컴포넌트
+
+| 파일 | 설명 |
+|------|------|
+| `src/components/fields/DateRangePicker.js` | growth-dashboard와 동일한 날짜 선택 UI (달력 팝오버 + 프리셋 드롭다운 + 비교 기간 모드). DateRangeContext 연동 |
+| `src/hooks/useStableFetch.js` | 탭 전환 시 깜빡임 방지 커스텀 훅 — 의존성 값이 JSON 비교 기준으로 실제 변경됐을 때만 재조회 |
+| `src/views/admin/default/components/VisitorTrendChart.jsx` | 일별 방문자수 & 페이지뷰 꺾은선 차트 (ApexCharts line) |
+| `src/views/admin/default/components/DeviceStatsChart.jsx` | 기기 유형별 도넛 차트 (desktop/mobile/tablet 분포) |
+| `src/views/admin/default/components/VisitorTypeChart.jsx` | 신규/재방문 도넛 차트 |
+| `src/views/admin/default/components/TopPages.jsx` | 많이 방문한 페이지 Top10 (방문 수 + 비율 바 게이지) |
+| `src/views/admin/default/components/BehaviorRates.jsx` | 이탈률 / 새로고침률 / 뒤로가기율 KPI 카드 3개 |
+| `src/views/admin/default/components/TopActions.jsx` | 자주 하는 행동 Top10 (event_type별 집계, 이벤트 타입 뱃지) |
+| `src/views/admin/default/components/TopReferrers.jsx` | 유입경로 Top5 (도넛 차트 + 목록) |
+
+#### 수정된 파일
+
+- **`src/views/admin/default/index.jsx`** — 전면 재작성
+  - `DateRangePicker` 상단 배치
+  - KPI 6개 카드: 방문자수 / 방문자당 페이지뷰 / 평균 체류시간 / 평균 스크롤 깊이 / 신규 방문 / 재방문
+  - `useStableFetch`로 탭 전환 깜빡임 방지
+  - 하단 섹션: 방문자&페이지뷰 추이 → 이탈지표 → 기기통계+방문유형 → 많이방문한페이지+자주하는행동 → 유입경로Top5
+
+#### zaService.js 신규 함수 (`src/views/admin/zestAnalytics/services/zaService.js`)
+
+| 함수 | 설명 |
+|------|------|
+| `getDashboardKPIs(params)` | 방문자수, 방문자당 페이지뷰, 평균 체류시간(time_on_page), 평균 스크롤 깊이, 신규/재방문 수 |
+| `getDailyVisitorTrend(params)` | 일별 {date, visitors, pageviews} 배열, KST 기준 집계 |
+| `getDeviceStats(params)` | 기기별 {device_type, count} 배열 |
+| `getVisitorTypeStats(params)` | {newVisitors, returningVisitors} — session_end 우선, 없으면 pageview fallback |
+| `getTopPages(params, limit=10)` | 페이지별 {page_url, pageviews, unique_visitors} 내림차순 |
+| `getBehaviorRates(params)` | {bounceRate, refreshRate, backRate} — session_end + is_bounce 기준 |
+| `getTopActions(params, limit=10)` | event_type + page_url 기준 행동 집계, event_name 컬럼 활용 |
+| `getTopReferrers(params, limit=5)` | channel 컬럼 우선, 없으면 page_referrer 파싱하여 도메인 추출 |
+
+#### 버그 수정
+
+- **방문자당 페이지뷰 계산 오류** — `pageviews / uniqueSessions` → `pageviews / uniqueVisitors` 로 수정
+- **is_new_visitor 타입 처리** — `true / 1 / '1' / 'true'` 모두 신규 방문으로 처리
+- **ESLint: useColorModeValue in callback** — `TopActions.jsx`에서 `rowBorderColor` 변수로 추출
+- **useStableFetch 호이스팅 에러** — `const fetchXxx` 정의 이후에 `useStableFetch` 호출하도록 순서 수정 (7개 파일 전체)
+
+#### za_events 스키마 확인 (2026-04-05)
+
+실제 컬럼명 확인으로 하기 버그 수정:
+- `referrer` → `page_referrer` (컬럼명 달랐음)
+- `element_text` — 존재하지 않음, `event_name` 으로 대체
+- `channel` 컬럼 존재 확인 → 유입경로 그루핑에 우선 사용
+- `is_new_visitor BOOLEAN`, `time_on_page INTEGER`, `scroll_depth INTEGER`, `visitor_id TEXT` 모두 확인
+- `page_refresh`, `page_back` 이벤트 미수집 → 이탈/새로고침/뒤로가기 지표는 SDK 미지원으로 데이터 없음
+
+---
+
+## [4.5.0] 2026-04-02 (정상 작동 확인: 2026-04-03)
 
 ### UX 스크롤 히트맵 구현
 
 #### 신규 기능
 
 - **HeatmapViewer 컴포넌트** (`src/views/admin/zestAnalytics/components/HeatmapViewer.jsx`)
-  - 좌측: iframe 실제 페이지 미리보기 + 투명 canvas 오버레이 (10% 구간별 COLD→HOT 색상)
-  - 우측 수직 바: 구간별 도달률 색상 슬롯 (HOT=빨강, COLD=파랑)
-  - 우측 통계: 방문자 / 페이지뷰 / 세션 수 / 도달 구간 (25/50/75/100%) / 도달률 추이 SVG 차트
-  - 상단 필터: 전체/PC/MO 탭 + 페이지 URL 드롭다운
-  - DateRangeContext 연동 (날짜 변경 시 자동 리패치)
-  - iframe 페이지 이동 감지 → 선택 URL 동기화 (same-origin 한정)
+  - 좌측: iframe 실제 페이지 미리보기 + 우측에 56px 수직 컬러 바 (canvas 오버레이 없음)
+  - 수직 바: 10% 구간별 COLD(파랑 #4a90d9) → HOT(빨강 #e53e3e) 그라디언트
+  - 우측 통계 패널: 방문자 / 페이지뷰 / 평균 도달률 / 세션 수 KPI 카드
+  - 도달 구간 카드: 25% / 50% / 75% / 100% 이상 도달률(%)
+  - 도달률 추이 SVG 차트 (0~10% → 90~100% 구간별 도달 감소 트렌드)
+  - 상단 필터: 전체/PC/MO 디바이스 탭 + 페이지 URL 드롭다운
+  - 날짜 프리셋: 오늘/어제/최근 7일/최근 30일 + 직접 입력 + 적용 버튼
+  - **자체 날짜 상태** (기본값: 오늘) — DateRangeContext 미사용
+  - iframe 페이지 이동 감지: SDK postMessage(`za_pageview`) 수신 방식
+    - 단, SDK가 CDN URL(`https://analytics.zestdot.com/sdk/za-sdk.js`)로 설치되어야 작동
+    - HTTPS 사이트에서 `http://localhost` SDK URL은 Chrome PNA 정책으로 차단됨
 
-- **ZestAnalytics 탭 추가** — "UX 히트맵" 탭 (대시보드 | UX 히트맵 | 추적 코드 관리)
+- **UX 히트맵 독립 페이지** (`src/views/admin/heatmap/index.jsx`)
+  - `/admin/heatmap` 경로, 사이드바에 "UX 히트맵" 메뉴 노출 (물방울 아이콘)
+  - ZestAnalytics 탭과 완전 분리된 독립 페이지
+
+- **ZestAnalytics.jsx 탭 구조**: 대시보드 / 추적 코드 관리 (2탭 유지, 히트맵 탭 없음)
 
 #### SDK v1.4.0
 
 | 항목 | 설명 |
 |------|------|
 | `scrollBuckets` 추가 | 10개 배열, `scrollBuckets[i] = 1` if scroll_depth >= i*10 |
-| `_trackScrollDepth()` 확장 | 스크롤마다 bucket 갱신 |
+| `_trackScrollDepth()` 확장 | 스크롤마다 10개 bucket 갱신 |
 | `_sendSessionEnd()` 확장 | `scroll_buckets`, `device_type` 추가 전송 |
 | `_resetSession()` 확장 | `scrollBuckets` 초기화 |
+| `trackPageView()` 확장 | `window.parent.postMessage({ type: 'za_pageview', page_url })` 전송 (iframe 감지용) |
 
 #### Supabase 변경사항 (`수퍼베이스_DB_세팅.md` Part 9)
 

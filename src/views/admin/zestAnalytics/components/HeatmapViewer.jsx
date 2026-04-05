@@ -287,11 +287,14 @@ export default function HeatmapViewer({
               : undefined
           }
         >
-          {pageList.map((p) => (
-            <option key={p.page_url} value={p.page_url}>
-              {p.page_url} ({p.session_count}세션)
-            </option>
-          ))}
+          {pageList.map((p) => {
+            const displayUrl = (() => { try { return decodeURIComponent(p.page_url); } catch { return p.page_url; } })();
+            return (
+              <option key={p.page_url} value={p.page_url}>
+                {displayUrl} ({p.session_count}세션)
+              </option>
+            );
+          })}
         </Select>
       </Box>
 

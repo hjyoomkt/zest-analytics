@@ -1,10 +1,10 @@
 /*!
-  _   _  ___  ____  ___ ________  _   _   _   _ ___   
- | | | |/ _ \|  _ \|_ _|__  / _ \| \ | | | | | |_ _| 
- | |_| | | | | |_) || |  / / | | |  \| | | | | || | 
+  _   _  ___  ____  ___ ________  _   _   _   _ ___
+ | | | |/ _ \|  _ \|_ _|__  / _ \| \ | | | | | |_ _|
+ | |_| | | | | |_) || |  / / | | |  \| | | | | || |
  |  _  | |_| |  _ < | | / /| |_| | |\  | | |_| || |
  |_| |_|\___/|_| \_\___/____\___/|_| \_|  \___/|___|
-                                                                                                                                                                                                                                                                                                                                       
+
 =========================================================
 * Horizon UI - v1.1.0
 =========================================================
@@ -20,153 +20,178 @@
 
 */
 
-// Chakra imports
+import React, { useState } from 'react';
+import { useStableFetch } from 'hooks/useStableFetch';
 import {
-  Avatar,
   Box,
-  Flex,
-  FormLabel,
   Icon,
-  Select,
   SimpleGrid,
   useColorModeValue,
-} from "@chakra-ui/react";
-// Assets
-import Usa from "assets/img/dashboards/usa.png";
-// Custom components
-import MiniCalendar from "components/calendar/MiniCalendar";
-import MiniStatistics from "components/card/MiniStatistics";
-import IconBox from "components/icons/IconBox";
-import React from "react";
+} from '@chakra-ui/react';
 import {
-  MdAddTask,
-  MdAttachMoney,
-  MdBarChart,
-  MdFileCopy,
-} from "react-icons/md";
-import CheckTable from "views/admin/default/components/CheckTable";
-import ComplexTable from "views/admin/default/components/ComplexTable";
-import DailyTraffic from "views/admin/default/components/DailyTraffic";
-import PieCard from "views/admin/default/components/PieCard";
-import Tasks from "views/admin/default/components/Tasks";
-import TotalSpent from "views/admin/default/components/TotalSpent";
-import WeeklyRevenue from "views/admin/default/components/WeeklyRevenue";
-import {
-  columnsDataCheck,
-  columnsDataComplex,
-} from "views/admin/default/variables/columnsData";
-import tableDataCheck from "views/admin/default/variables/tableDataCheck.json";
-import tableDataComplex from "views/admin/default/variables/tableDataComplex.json";
+  MdPeople,
+  MdPageview,
+  MdTimer,
+  MdTrendingDown,
+  MdPersonAdd,
+  MdRepeat,
+} from 'react-icons/md';
+import MiniStatistics from 'components/card/MiniStatistics';
+import IconBox from 'components/icons/IconBox';
+import DateRangePicker from 'components/fields/DateRangePicker';
+import { useAuth } from 'contexts/AuthContext';
+import { useDateRange } from 'contexts/DateRangeContext';
+import { getDashboardKPIs } from 'views/admin/zestAnalytics/services/zaService';
+import VisitorTrendChart from 'views/admin/default/components/VisitorTrendChart';
+import DeviceStatsChart from 'views/admin/default/components/DeviceStatsChart';
+import VisitorTypeChart from 'views/admin/default/components/VisitorTypeChart';
+import TopPages from 'views/admin/default/components/TopPages';
+import BehaviorRates from 'views/admin/default/components/BehaviorRates';
+import TopActions from 'views/admin/default/components/TopActions';
+import TopReferrers from 'views/admin/default/components/TopReferrers';
+import OsBrowserStats from 'views/admin/default/components/OsBrowserStats';
 
-export default function UserReports() {
-  // Chakra Color Mode
-  const brandColor = useColorModeValue("brand.500", "white");
-  const boxBg = useColorModeValue("secondaryGray.300", "whiteAlpha.100");
+export default function MainDashboard() {
+  const brandColor = useColorModeValue('brand.500', 'white');
+  const boxBg = useColorModeValue('secondaryGray.300', 'whiteAlpha.100');
+
+  const { currentAdvertiserId, availableAdvertisers } = useAuth();
+  const { startDate, endDate } = useDateRange();
+
+  const [kpi, setKpi] = useState({
+    visitors: 0,
+    pageviews: 0,
+    pagesPerVisit: 0,
+    avgTimeOnSite: 0,
+    avgScrollDepth: 0,
+    newVisitors: 0,
+    returningVisitors: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  const fetchKPIs = async () => {
+    try {
+      setLoading(true);
+      const ids = (availableAdvertisers || []).map(a => a.id);
+      const data = await getDashboardKPIs({
+        advertiserId: currentAdvertiserId,
+        availableAdvertiserIds: ids,
+        startDate,
+        endDate,
+      });
+      setKpi(data);
+    } catch (e) {
+      console.error('[MainDashboard] KPI 조회 실패:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useStableFetch(fetchKPIs, [currentAdvertiserId, availableAdvertisers, startDate, endDate]);
+
+  const formatNum = (n) => (n ?? 0).toLocaleString('ko-KR');
+  const formatTime = (secs) => {
+    if (!secs) return '0초';
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}분 ${s}초` : `${s}초`;
+  };
+
   return (
-    <Box pt={{ base: "130px", md: "80px", xl: "80px" }}>
+    <Box pt={{ base: '130px', md: '80px', xl: '80px' }}>
+      {/* 날짜 선택 */}
+      <DateRangePicker />
+
+      {/* KPI 카드 6개 */}
       <SimpleGrid
-        columns={{ base: 1, md: 2, lg: 3, "2xl": 6 }}
+        columns={{ base: 1, md: 2, lg: 3, '2xl': 6 }}
         gap='20px'
         mb='20px'>
         <MiniStatistics
           startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdBarChart} color={brandColor} />
-              }
+            <IconBox w='56px' h='56px' bg={boxBg}
+              icon={<Icon w='32px' h='32px' as={MdPeople} color={brandColor} />}
             />
           }
-          name='Earnings'
-          value='$350.4'
+          name='방문자수'
+          value={loading ? '...' : formatNum(kpi.visitors)}
+        />
+        <MiniStatistics
+          startContent={
+            <IconBox w='56px' h='56px' bg={boxBg}
+              icon={<Icon w='32px' h='32px' as={MdPageview} color={brandColor} />}
+            />
+          }
+          name='방문자당 페이지뷰'
+          value={loading ? '...' : kpi.pagesPerVisit.toFixed(2)}
+        />
+        <MiniStatistics
+          startContent={
+            <IconBox w='56px' h='56px' bg={boxBg}
+              icon={<Icon w='32px' h='32px' as={MdTimer} color={brandColor} />}
+            />
+          }
+          name='평균 체류시간'
+          value={loading ? '...' : formatTime(kpi.avgTimeOnSite)}
+        />
+        <MiniStatistics
+          startContent={
+            <IconBox w='56px' h='56px' bg={boxBg}
+              icon={<Icon w='32px' h='32px' as={MdTrendingDown} color={brandColor} />}
+            />
+          }
+          name='평균 스크롤 깊이'
+          value={loading ? '...' : `${kpi.avgScrollDepth}%`}
         />
         <MiniStatistics
           startContent={
             <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdAttachMoney} color={brandColor} />
-              }
-            />
-          }
-          name='Spend this month'
-          value='$642.39'
-        />
-        <MiniStatistics growth='+23%' name='Sales' value='$574.34' />
-        <MiniStatistics
-          endContent={
-            <Flex me='-16px' mt='10px'>
-              <FormLabel htmlFor='balance'>
-                <Avatar src={Usa} />
-              </FormLabel>
-              <Select
-                id='balance'
-                variant='mini'
-                mt='5px'
-                me='0px'
-                defaultValue='usd'>
-                <option value='usd'>USD</option>
-                <option value='eur'>EUR</option>
-                <option value='gba'>GBA</option>
-              </Select>
-            </Flex>
-          }
-          name='Your balance'
-          value='$1,000'
-        />
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
+              w='56px' h='56px'
               bg='linear-gradient(90deg, #4481EB 0%, #04BEFE 100%)'
-              icon={<Icon w='28px' h='28px' as={MdAddTask} color='white' />}
+              icon={<Icon w='28px' h='28px' as={MdPersonAdd} color='white' />}
             />
           }
-          name='New Tasks'
-          value='154'
+          name='신규 방문'
+          value={loading ? '...' : formatNum(kpi.newVisitors)}
         />
         <MiniStatistics
           startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdFileCopy} color={brandColor} />
-              }
+            <IconBox w='56px' h='56px' bg={boxBg}
+              icon={<Icon w='32px' h='32px' as={MdRepeat} color={brandColor} />}
             />
           }
-          name='Total Projects'
-          value='2935'
+          name='재방문'
+          value={loading ? '...' : formatNum(kpi.returningVisitors)}
         />
       </SimpleGrid>
 
-      <SimpleGrid columns={{ base: 1, md: 2, xl: 2 }} gap='20px' mb='20px'>
-        <TotalSpent />
-        <WeeklyRevenue />
+      {/* 방문자 & 페이지뷰 추이 (전체 너비) */}
+      <Box mb='20px'>
+        <VisitorTrendChart />
+      </Box>
+
+      {/* 이탈/새로고침/뒤로가기율 */}
+      <Box mb='20px'>
+        <BehaviorRates />
+      </Box>
+
+      {/* 기기통계 + OS/브라우저 + 방문유형 */}
+      <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap='20px' mb='20px'>
+        <DeviceStatsChart />
+        <OsBrowserStats />
+        <VisitorTypeChart />
       </SimpleGrid>
-      <SimpleGrid columns={{ base: 1, md: 1, xl: 2 }} gap='20px' mb='20px'>
-        <CheckTable columnsData={columnsDataCheck} tableData={tableDataCheck} />
-        <SimpleGrid columns={{ base: 1, md: 2, xl: 2 }} gap='20px'>
-          <DailyTraffic />
-          <PieCard />
-        </SimpleGrid>
+
+      {/* 많이 방문한 페이지 + 자주 하는 행동 */}
+      <SimpleGrid columns={{ base: 1, md: 2 }} gap='20px' mb='20px'>
+        <TopPages />
+        <TopActions />
       </SimpleGrid>
-      <SimpleGrid columns={{ base: 1, md: 1, xl: 2 }} gap='20px' mb='20px'>
-        <ComplexTable
-          columnsData={columnsDataComplex}
-          tableData={tableDataComplex}
-        />
-        <SimpleGrid columns={{ base: 1, md: 2, xl: 2 }} gap='20px'>
-          <Tasks />
-          <MiniCalendar h='100%' minW='100%' selectRange={false} />
-        </SimpleGrid>
-      </SimpleGrid>
+
+      {/* 유입경로 Top5 */}
+      <Box mb='20px'>
+        <TopReferrers />
+      </Box>
     </Box>
   );
 }

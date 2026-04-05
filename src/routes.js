@@ -11,6 +11,7 @@ import {
   MdSecurity,
   MdBusiness,
   MdOutlineWaterDrop,
+  MdCallSplit,
 } from 'react-icons/md';
 
 // Admin Imports
@@ -20,6 +21,7 @@ import Profile from 'views/admin/profile';
 import DataTables from 'views/admin/dataTables';
 import ZestAnalytics from 'views/admin/zestAnalytics';
 import Heatmap from 'views/admin/heatmap';
+import TrafficSource from 'views/admin/trafficSource';
 
 // SuperAdmin Imports
 import SuperAdminDashboard from 'views/superadmin/default';
@@ -42,6 +44,27 @@ const routes = [
     component: <MainDashboard />,
   },
   {
+    name: 'Zest Analytics',
+    layout: '/admin',
+    path: '/zest-analytics',
+    icon: <Icon as={MdTrackChanges} width="20px" height="20px" color="inherit" />,
+    component: <ZestAnalytics />,
+  },
+  {
+    name: '유입 경로 분석',
+    layout: '/admin',
+    path: '/traffic-source',
+    icon: <Icon as={MdCallSplit} width="20px" height="20px" color="inherit" />,
+    component: <TrafficSource />,
+  },
+  {
+    name: 'UX 히트맵',
+    layout: '/admin',
+    path: '/heatmap',
+    icon: <Icon as={MdOutlineWaterDrop} width="20px" height="20px" color="inherit" />,
+    component: <Heatmap />,
+  },
+  {
     name: '슈퍼어드민',
     layout: '/superadmin',
     path: '',
@@ -58,6 +81,13 @@ const routes = [
     component: <ClientAdminDashboard />,
     requiresPermission: 'brandadmin',
     showInSidebar: true,
+  },
+  {
+    name: 'Profile',
+    layout: '/admin',
+    path: '/profile',
+    icon: <Icon as={MdPerson} width="20px" height="20px" color="inherit" />,
+    component: <Profile />,
   },
   {
     name: 'NFT Marketplace',
@@ -81,27 +111,7 @@ const routes = [
     icon: <Icon as={MdBarChart} width="20px" height="20px" color="inherit" />,
     path: '/data-tables',
     component: <DataTables />,
-  },
-  {
-    name: 'Profile',
-    layout: '/admin',
-    path: '/profile',
-    icon: <Icon as={MdPerson} width="20px" height="20px" color="inherit" />,
-    component: <Profile />,
-  },
-  {
-    name: 'Zest Analytics',
-    layout: '/admin',
-    path: '/zest-analytics',
-    icon: <Icon as={MdTrackChanges} width="20px" height="20px" color="inherit" />,
-    component: <ZestAnalytics />,
-  },
-  {
-    name: 'UX 히트맵',
-    layout: '/admin',
-    path: '/heatmap',
-    icon: <Icon as={MdOutlineWaterDrop} width="20px" height="20px" color="inherit" />,
-    component: <Heatmap />,
+    hidden: true,
   },
   {
     name: 'Sign In',

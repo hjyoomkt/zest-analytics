@@ -757,6 +757,580 @@ export const getHeatmapPageStats = async ({
   }
 };
 
+// ============================================================================
+// 대시보드 KPI 및 트렌드
+// ============================================================================
+
+/**
+ * 대시보드 KPI 요약 (방문자수, 페이지뷰, 체류시간, 스크롤깊이, 신규/재방문)
+ */
+export const getDashboardKPIs = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) {
+      return {
+        visitors: 0, pageviews: 0, pagesPerVisit: 0,
+        avgTimeOnSite: 0, avgScrollDepth: 0, newVisitors: 0, returningVisitors: 0,
+      };
+    }
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    // 페이지뷰 이벤트 조회 (방문자수, 페이지뷰, 신규/재방문)
+    const { data: pvData, error: pvError } = await supabase
+      .from('za_events')
+      .select('visitor_id, session_id, page_url, is_new_visitor')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (pvError) throw pvError;
+
+    // session_end 이벤트 조회 (체류시간, 스크롤, 신규/재방문)
+    const { data: seData, error: seError } = await supabase
+      .from('za_events')
+      .select('visitor_id, session_id, time_on_page, scroll_depth, is_new_visitor')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'session_end')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (seError) throw seError;
+
+    const pvRows = pvData || [];
+    const seRows = seData || [];
+
+    // 고유 방문자 수
+    const visitorSet = new Set(pvRows.map(r => r.visitor_id).filter(Boolean));
+    const uniqueVisitors = visitorSet.size;
+    const pageviews = pvRows.length;
+
+    // 방문자당 페이지뷰 = 전체 페이지뷰 / 고유 방문자
+    const pagesPerVisit = uniqueVisitors > 0 ? parseFloat((pageviews / uniqueVisitors).toFixed(2)) : 0;
+
+    const sessionsWithTime = seRows.filter(r => r.time_on_page != null);
+    const avgTimeOnSite = sessionsWithTime.length > 0
+      ? Math.round(sessionsWithTime.reduce((s, r) => s + r.time_on_page, 0) / sessionsWithTime.length)
+      : 0;
+
+    const sessionsWithScroll = seRows.filter(r => r.scroll_depth != null);
+    const avgScrollDepth = sessionsWithScroll.length > 0
+      ? Math.round(sessionsWithScroll.reduce((s, r) => s + r.scroll_depth, 0) / sessionsWithScroll.length)
+      : 0;
+
+    // 신규/재방문: session_end 우선, 없으면 pageview에서 visitor 기준으로 집계
+    const isNewFn = (v) => v === true || v === 1 || v === '1' || v === 'true';
+    let newVisitors = 0;
+    let returningVisitors = 0;
+
+    if (seRows.length > 0 && seRows.some(r => r.is_new_visitor != null)) {
+      // session_end 기준 (세션 수)
+      newVisitors = seRows.filter(r => isNewFn(r.is_new_visitor)).length;
+      returningVisitors = seRows.filter(r => r.is_new_visitor != null && !isNewFn(r.is_new_visitor)).length;
+    } else if (pvRows.some(r => r.is_new_visitor != null)) {
+      // pageview 기준: visitor당 첫 번째 is_new_visitor 값 사용
+      const visitorNewMap = {};
+      pvRows.forEach(r => {
+        if (r.visitor_id && r.is_new_visitor != null && !(r.visitor_id in visitorNewMap)) {
+          visitorNewMap[r.visitor_id] = isNewFn(r.is_new_visitor);
+        }
+      });
+      newVisitors = Object.values(visitorNewMap).filter(v => v === true).length;
+      returningVisitors = Object.values(visitorNewMap).filter(v => v === false).length;
+    }
+
+    return {
+      visitors: uniqueVisitors,
+      pageviews,
+      pagesPerVisit,
+      avgTimeOnSite,
+      avgScrollDepth,
+      newVisitors,
+      returningVisitors,
+    };
+  } catch (error) {
+    console.error('[ZA Service] getDashboardKPIs error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 일별 방문자 & 페이지뷰 트렌드
+ * @returns {Promise<Array<{date, visitors, pageviews}>>}
+ */
+export const getDailyVisitorTrend = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('visitor_id, session_id, event_type, created_at')
+      .in('advertiser_id', ids)
+      .in('event_type', ['pageview'])
+      .gte('created_at', startTs)
+      .lte('created_at', endTs)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    // 날짜별 집계
+    const byDate = {};
+    (data || []).forEach(row => {
+      // KST 날짜 추출 (UTC+9)
+      const d = new Date(row.created_at);
+      d.setHours(d.getHours() + 9);
+      const dateStr = d.toISOString().split('T')[0];
+
+      if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, visitors: new Set(), pageviews: 0 };
+      if (row.visitor_id) byDate[dateStr].visitors.add(row.visitor_id);
+      byDate[dateStr].pageviews += 1;
+    });
+
+    return Object.values(byDate)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(r => ({ date: r.date, visitors: r.visitors.size, pageviews: r.pageviews }));
+  } catch (error) {
+    console.error('[ZA Service] getDailyVisitorTrend error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 기기 유형별 통계
+ * @returns {Promise<Array<{device_type, count}>>}
+ */
+export const getDeviceStats = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('device_type, visitor_id')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const byDevice = {};
+    (data || []).forEach(row => {
+      const dtype = row.device_type || 'unknown';
+      if (!byDevice[dtype]) byDevice[dtype] = new Set();
+      if (row.visitor_id) byDevice[dtype].add(row.visitor_id);
+    });
+
+    return Object.entries(byDevice).map(([device_type, visitors]) => ({
+      device_type,
+      count: visitors.size,
+    }));
+  } catch (error) {
+    console.error('[ZA Service] getDeviceStats error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 방문 유형 통계 (신규 vs 재방문)
+ * @returns {Promise<{newVisitors, returningVisitors}>}
+ */
+export const getVisitorTypeStats = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return { newVisitors: 0, returningVisitors: 0 };
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('is_new_visitor')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'session_end')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const rows = data || [];
+    const isNewFn = (v) => v === true || v === 1 || v === '1' || v === 'true';
+
+    // session_end에 is_new_visitor 없으면 pageview에서 fallback
+    if (rows.length > 0 && rows.some(r => r.is_new_visitor != null)) {
+      return {
+        newVisitors: rows.filter(r => isNewFn(r.is_new_visitor)).length,
+        returningVisitors: rows.filter(r => r.is_new_visitor != null && !isNewFn(r.is_new_visitor)).length,
+      };
+    }
+
+    // fallback: pageview 기준
+    const { data: pvData, error: pvError } = await supabase
+      .from('za_events')
+      .select('visitor_id, is_new_visitor')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs)
+      .not('is_new_visitor', 'is', null);
+
+    if (pvError) throw pvError;
+
+    const visitorNewMap = {};
+    (pvData || []).forEach(r => {
+      if (r.visitor_id && !(r.visitor_id in visitorNewMap)) {
+        visitorNewMap[r.visitor_id] = isNewFn(r.is_new_visitor);
+      }
+    });
+    return {
+      newVisitors: Object.values(visitorNewMap).filter(v => v === true).length,
+      returningVisitors: Object.values(visitorNewMap).filter(v => v === false).length,
+    };
+  } catch (error) {
+    console.error('[ZA Service] getVisitorTypeStats error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 많이 방문한 페이지 Top N
+ * @returns {Promise<Array<{page_url, pageviews, unique_visitors}>>}
+ */
+export const getTopPages = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+  limit = 10,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('page_url, visitor_id')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const byPage = {};
+    (data || []).forEach(row => {
+      const url = row.page_url || '/';
+      if (!byPage[url]) byPage[url] = { page_url: url, pageviews: 0, visitors: new Set() };
+      byPage[url].pageviews += 1;
+      if (row.visitor_id) byPage[url].visitors.add(row.visitor_id);
+    });
+
+    return Object.values(byPage)
+      .map(p => ({ page_url: p.page_url, pageviews: p.pageviews, unique_visitors: p.visitors.size }))
+      .sort((a, b) => b.pageviews - a.pageviews)
+      .slice(0, limit);
+  } catch (error) {
+    console.error('[ZA Service] getTopPages error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 이탈률 / 새로고침률 / 뒤로가기율
+ * @returns {Promise<{bounceRate, refreshRate, backRate}>}
+ */
+export const getBehaviorRates = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return { bounceRate: 0, refreshRate: 0, backRate: 0 };
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('event_type, is_bounce, session_id')
+      .in('advertiser_id', ids)
+      .in('event_type', ['session_end', 'page_refresh', 'page_back'])
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const rows = data || [];
+    const sessions = rows.filter(r => r.event_type === 'session_end');
+    const total = sessions.length;
+    const bounced = sessions.filter(r => r.is_bounce === true).length;
+    const refreshed = rows.filter(r => r.event_type === 'page_refresh').length;
+    const backed = rows.filter(r => r.event_type === 'page_back').length;
+
+    return {
+      bounceRate: total > 0 ? parseFloat(((bounced / total) * 100).toFixed(1)) : 0,
+      refreshRate: total > 0 ? parseFloat(((refreshed / total) * 100).toFixed(1)) : 0,
+      backRate: total > 0 ? parseFloat(((backed / total) * 100).toFixed(1)) : 0,
+    };
+  } catch (error) {
+    console.error('[ZA Service] getBehaviorRates error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 자주 하는 행동 Top N (페이지뷰, 스크롤, 클릭 등 이벤트 집계)
+ * @returns {Promise<Array<{label, page_url, event_type, count}>>}
+ */
+export const getTopActions = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+  limit = 10,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('event_type, page_url, scroll_depth, event_name')
+      .in('advertiser_id', ids)
+      .neq('event_type', 'session_end')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) {
+      console.error('[ZA Service] getTopActions query error:', error);
+      throw error;
+    }
+
+    const decodeUrl = (url) => { try { return decodeURIComponent(url); } catch { return url; } };
+    const byKey = {};
+    (data || []).forEach(row => {
+      const etype = row.event_type || 'pageview';
+      const url = row.page_url || '/';
+      const displayUrl = decodeUrl(url);
+      let label = '';
+      if (etype === 'pageview') label = `${displayUrl} 방문`;
+      else if (etype === 'scroll') label = `스크롤 ${row.scroll_depth ?? ''}% 도달 | ${displayUrl}`;
+      else if (row.event_name) label = `${row.event_name} | ${displayUrl}`;
+      else label = `${etype} | ${displayUrl}`;
+
+      const key = `${etype}::${url}::${row.scroll_depth ?? ''}::${row.event_name ?? ''}`;
+      if (!byKey[key]) byKey[key] = { label, page_url: url, event_type: etype, count: 0 };
+      byKey[key].count += 1;
+    });
+
+    return Object.values(byKey)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+  } catch (error) {
+    console.error('[ZA Service] getTopActions error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 유입경로 Top N (referrer 기준)
+ * @returns {Promise<Array<{referrer, count, pct}>>}
+ */
+export const getTopReferrers = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+  limit = 5,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('page_referrer, channel, visitor_id')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) {
+      console.error('[ZA Service] getTopReferrers query error:', error);
+      throw error;
+    }
+
+    const byRef = {};
+    (data || []).forEach(row => {
+      // channel 컬럼이 있으면 우선 사용, 없으면 page_referrer 파싱
+      let ref;
+      if (row.channel && row.channel.trim() !== '') {
+        ref = row.channel.trim();
+      } else {
+        const raw = row.page_referrer;
+        if (!raw || raw.trim() === '') {
+          ref = '직접 유입';
+        } else {
+          try {
+            // 프로토콜이 없으면 붙여서 파싱
+            const urlStr = raw.startsWith('http') ? raw : `https://${raw}`;
+            ref = new URL(urlStr).hostname.replace(/^www\./, '');
+          } catch {
+            ref = raw;
+          }
+        }
+      }
+
+      if (!byRef[ref]) byRef[ref] = { referrer: ref, visitors: new Set(), count: 0 };
+      if (row.visitor_id) byRef[ref].visitors.add(row.visitor_id);
+      byRef[ref].count += 1;
+    });
+
+    const total = Object.values(byRef).reduce((s, r) => s + r.visitors.size, 0);
+    return Object.values(byRef)
+      .map(r => ({
+        referrer: r.referrer,
+        count: r.visitors.size,
+        pct: total > 0 ? parseFloat(((r.visitors.size / total) * 100).toFixed(1)) : 0,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+  } catch (error) {
+    console.error('[ZA Service] getTopReferrers error:', error);
+    throw error;
+  }
+};
+
+/**
+ * OS별 방문자 통계
+ * @param {object} params
+ * @returns {Promise<Array>} [{os, count}]
+ */
+export const getOsStats = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('os, visitor_id')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const grouped = {};
+    (data || []).forEach(row => {
+      const key = row.os || 'Unknown';
+      if (!grouped[key]) grouped[key] = { events: 0, visitors: new Set() };
+      grouped[key].events += 1;
+      if (row.visitor_id) grouped[key].visitors.add(row.visitor_id);
+    });
+
+    return Object.entries(grouped)
+      .map(([os, g]) => ({ os, events: g.events, users: g.visitors.size }))
+      .sort((a, b) => b.events - a.events);
+  } catch (error) {
+    console.error('[ZA Service] getOsStats error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 브라우저별 방문자 통계
+ * @param {object} params
+ * @returns {Promise<Array>} [{browser, events, users}]
+ */
+export const getBrowserStats = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('browser, visitor_id')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const grouped = {};
+    (data || []).forEach(row => {
+      const key = row.browser || 'Unknown';
+      if (!grouped[key]) grouped[key] = { events: 0, visitors: new Set() };
+      grouped[key].events += 1;
+      if (row.visitor_id) grouped[key].visitors.add(row.visitor_id);
+    });
+
+    return Object.entries(grouped)
+      .map(([browser, g]) => ({ browser, events: g.events, users: g.visitors.size }))
+      .sort((a, b) => b.events - a.events);
+  } catch (error) {
+    console.error('[ZA Service] getBrowserStats error:', error);
+    throw error;
+  }
+};
+
 /**
  * 일별 이벤트 통계 (테이블용)
  * @param {object} params - 조회 파라미터
@@ -820,6 +1394,459 @@ export const getDailyEventStats = async ({
     return result;
   } catch (error) {
     console.error('[ZA Service] getDailyEventStats error:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
+// 채널/소스/미디엄/캠페인 UTM 조합별 통합 분석
+// ============================================================================
+
+/**
+ * 채널·소스·미디엄·캠페인을 한 행에 모두 보여주는 UTM 조합 분석
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {Array<string>} params.availableAdvertiserIds
+ * @param {string} params.startDate - YYYY-MM-DD
+ * @param {string} params.endDate   - YYYY-MM-DD
+ * @returns {Promise<Array>} UTM 조합별 통계 배열
+ */
+export const getUTMBreakdown = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    let query = supabase
+      .from('za_events')
+      .select(
+        'visitor_id, session_id, event_type, channel, utm_source, utm_medium, utm_campaign, value, time_on_page, scroll_depth'
+      )
+      .in('advertiser_id', ids);
+
+    if (startDate && endDate) {
+      query = query
+        .gte('created_at', `${startDate}T00:00:00+09:00`)
+        .lte('created_at', `${endDate}T23:59:59+09:00`);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const groups = {};
+    const sessionGroupMap = {}; // session_id → group key
+    const sessionEndEvents = [];
+
+    const makeKey = (event) =>
+      [
+        event.channel      || 'direct',
+        event.utm_source   || '-',
+        event.utm_medium   || '-',
+        event.utm_campaign || '-',
+      ].join('|');
+
+    const getOrCreate = (key, event) => {
+      if (!groups[key]) {
+        groups[key] = {
+          channel:  event.channel      || 'direct',
+          source:   event.utm_source   || '-',
+          medium:   event.utm_medium   || '-',
+          campaign: event.utm_campaign || '-',
+          visitors: new Set(),
+          sessions: new Set(),
+          pageviews: 0,
+          purchases: 0,
+          revenue: 0,
+          addToCarts: 0,
+          signups: 0,
+          leads: 0,
+          totalTimeOnPage: 0,
+          sessionEndCount: 0,
+          totalScrollDepth: 0,
+        };
+      }
+      return groups[key];
+    };
+
+    // Pass 1: pageview / 전환 이벤트 집계
+    (data || []).forEach((event) => {
+      if (event.event_type === 'session_end') {
+        sessionEndEvents.push(event);
+        return;
+      }
+
+      const key = makeKey(event);
+      const g = getOrCreate(key, event);
+      if (event.visitor_id) g.visitors.add(event.visitor_id);
+      g.sessions.add(event.session_id);
+
+      // 세션 → 그룹 키 매핑 (session_end 매칭용)
+      if (!sessionGroupMap[event.session_id]) {
+        sessionGroupMap[event.session_id] = key;
+      }
+
+      if (event.event_type === 'pageview')    g.pageviews++;
+      if (event.event_type === 'purchase')    { g.purchases++; g.revenue += parseFloat(event.value || 0); }
+      if (event.event_type === 'add_to_cart') g.addToCarts++;
+      if (event.event_type === 'signup')      g.signups++;
+      if (event.event_type === 'lead')        g.leads++;
+    });
+
+    // Pass 2: session_end 이벤트로 체류시간/스크롤 집계
+    sessionEndEvents.forEach((event) => {
+      if (!event.time_on_page || event.time_on_page <= 0) return;
+
+      // session_end는 channel만 있으므로 매핑 먼저 시도, 없으면 channel-only 키
+      const key =
+        sessionGroupMap[event.session_id] ||
+        [event.channel || 'direct', '-', '-', '-'].join('|');
+
+      const g = groups[key];
+      if (!g) return;
+
+      g.totalTimeOnPage += event.time_on_page;
+      g.sessionEndCount++;
+      g.totalScrollDepth += event.scroll_depth || 0;
+    });
+
+    // 최종 결과 배열 변환 및 정렬 (사용자수 내림차순)
+    return Object.values(groups)
+      .map((g) => ({
+        channel:  g.channel,
+        source:   g.source,
+        medium:   g.medium,
+        campaign: g.campaign,
+        users: g.visitors.size,
+        pageviews: g.pageviews,
+        avgPageviewsPerUser: g.visitors.size > 0 ? +(g.pageviews / g.visitors.size).toFixed(2) : 0,
+        avgTimeOnPage: g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
+        avgScrollDepth: g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
+        purchases: g.purchases,
+        revenue: g.revenue,
+        addToCarts: g.addToCarts,
+        signups: g.signups,
+        leads: g.leads,
+        memberConversionRate: g.visitors.size > 0 ? +((g.signups / g.visitors.size) * 100).toFixed(2) : 0,
+        purchaseConversionRate: g.visitors.size > 0 ? +((g.purchases / g.visitors.size) * 100).toFixed(2) : 0,
+      }))
+      .sort((a, b) => b.users - a.users);
+  } catch (error) {
+    console.error('[ZA Service] getUTMBreakdown error:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
+// 유입 경로 분석 (referrer 도메인 기준 전환 지표)
+// ============================================================================
+
+/**
+ * referrer 도메인 기준 유입 경로 분석 (테이블용)
+ * @param {object} params
+ * @returns {Promise<Array>} 소스별 {source, lastUtmChannel, totalVisits, visitors, ...}
+ */
+export const getReferrerBreakdown = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs   = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select(
+        'visitor_id, session_id, event_type, page_referrer, channel, value, time_on_page, scroll_depth, created_at'
+      )
+      .in('advertiser_id', ids)
+      .in('event_type', ['pageview', 'purchase', 'signup', 'lead', 'add_to_cart', 'session_end'])
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const extractDomain = (referrer) => {
+      if (!referrer || referrer.trim() === '') return '직접 유입';
+      try {
+        const urlStr = referrer.startsWith('http') ? referrer : `https://${referrer}`;
+        return new URL(urlStr).hostname.replace(/^www\./, '');
+      } catch {
+        return referrer;
+      }
+    };
+
+    const groups = {};
+    const sessionRefMap = {};
+    const refChannelMap = {};
+
+    const getOrCreate = (ref) => {
+      if (!groups[ref]) {
+        groups[ref] = {
+          source: ref,
+          lastUtmChannel: null,
+          totalVisits: 0,
+          visitors: new Set(),
+          pageviews: 0,
+          signups: 0,
+          purchasers: new Set(),
+          purchaseCount: 0,
+          revenue: 0,
+          addToCarts: 0,
+          leads: 0,
+          totalTimeOnPage: 0,
+          sessionEndCount: 0,
+          totalScrollDepth: 0,
+        };
+      }
+      return groups[ref];
+    };
+
+    const rows = data || [];
+
+    // Pass 1: pageview → referrer 집계
+    rows
+      .filter((e) => e.event_type === 'pageview')
+      .forEach((event) => {
+        const ref = extractDomain(event.page_referrer);
+        const g   = getOrCreate(ref);
+        g.totalVisits++;
+        g.pageviews++;
+        if (event.visitor_id) g.visitors.add(event.visitor_id);
+        if (!sessionRefMap[event.session_id]) sessionRefMap[event.session_id] = ref;
+        if (event.channel) {
+          const ts = new Date(event.created_at).getTime();
+          if (!refChannelMap[ref] || ts > refChannelMap[ref].ts) {
+            refChannelMap[ref] = { channel: event.channel, ts };
+          }
+        }
+      });
+
+    // Pass 2: session_end → 체류시간/스크롤
+    rows
+      .filter((e) => e.event_type === 'session_end')
+      .forEach((event) => {
+        const ref = sessionRefMap[event.session_id];
+        if (!ref || !groups[ref]) return;
+        const g = groups[ref];
+        if (event.time_on_page && event.time_on_page > 0) {
+          g.totalTimeOnPage += event.time_on_page;
+          g.sessionEndCount++;
+          g.totalScrollDepth += event.scroll_depth || 0;
+        }
+      });
+
+    // Pass 3: 전환 이벤트 → 세션 referrer 귀속
+    rows
+      .filter((e) => ['purchase', 'signup', 'lead', 'add_to_cart'].includes(e.event_type))
+      .forEach((event) => {
+        const ref = sessionRefMap[event.session_id] || '직접 유입';
+        const g   = groups[ref] || getOrCreate(ref);
+        if (event.event_type === 'signup')      g.signups++;
+        if (event.event_type === 'lead')        g.leads++;
+        if (event.event_type === 'add_to_cart') g.addToCarts++;
+        if (event.event_type === 'purchase') {
+          g.purchaseCount++;
+          if (event.visitor_id) g.purchasers.add(event.visitor_id);
+          g.revenue += parseFloat(event.value || 0);
+        }
+      });
+
+    Object.keys(groups).forEach((ref) => {
+      groups[ref].lastUtmChannel = refChannelMap[ref]?.channel ?? null;
+    });
+
+    return Object.values(groups)
+      .map((g) => ({
+        source:                 g.source,
+        lastUtmChannel:         g.lastUtmChannel,
+        totalVisits:            g.totalVisits,
+        visitors:               g.visitors.size,
+        pageviews:              g.pageviews,
+        avgTimeOnPage:          g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
+        avgScrollDepth:         g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
+        signups:                g.signups,
+        memberConversionRate:   g.visitors.size > 0 ? +((g.signups / g.visitors.size) * 100).toFixed(2) : 0,
+        purchasers:             g.purchasers.size,
+        purchaseCount:          g.purchaseCount,
+        revenue:                g.revenue,
+        purchaseConversionRate: g.visitors.size > 0 ? +((g.purchaseCount / g.visitors.size) * 100).toFixed(2) : 0,
+        avgOrderValue:          g.purchaseCount > 0 ? Math.round(g.revenue / g.purchaseCount) : 0,
+        addToCarts:             g.addToCarts,
+        leads:                  g.leads,
+      }))
+      .sort((a, b) => b.totalVisits - a.totalVisits);
+  } catch (error) {
+    console.error('[ZA Service] getReferrerBreakdown error:', error);
+    throw error;
+  }
+};
+
+/**
+ * referrer별 시간대별 모든 지표 (차트용, 한 번 조회로 전 지표 반환)
+ * @param {object} params
+ * @param {string[]} [params.referrers] - 필터할 referrer 배열 (null이면 전체)
+ * @returns {Promise<{[referrer]: {totalVisits,visitors,signups,purchasers,purchaseCount,revenue,purchaseConversionRate,avgOrderValue}: number[24]}>}
+ */
+export const getReferrerHourlyData = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+  referrers = null,
+}) => {
+  const EMPTY_METRICS = () => ({
+    totalVisits:            Array(24).fill(0),
+    visitors:               Array(24).fill(0),
+    signups:                Array(24).fill(0),
+    purchasers:             Array(24).fill(0),
+    purchaseCount:          Array(24).fill(0),
+    revenue:                Array(24).fill(0),
+    purchaseConversionRate: Array(24).fill(0),
+    avgOrderValue:          Array(24).fill(0),
+  });
+
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return { '합계': EMPTY_METRICS() };
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs   = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('visitor_id, session_id, event_type, page_referrer, value, created_at')
+      .in('advertiser_id', ids)
+      .in('event_type', ['pageview', 'signup', 'purchase'])
+      .gte('created_at', startTs)
+      .lte('created_at', endTs);
+
+    if (error) throw error;
+
+    const extractDomain = (referrer) => {
+      if (!referrer || referrer.trim() === '') return '직접 유입';
+      try {
+        const urlStr = referrer.startsWith('http') ? referrer : `https://${referrer}`;
+        return new URL(urlStr).hostname.replace(/^www\./, '');
+      } catch {
+        return referrer;
+      }
+    };
+
+    const kstHour = (created_at) => {
+      const d = new Date(created_at);
+      return (d.getUTCHours() + 9) % 24;
+    };
+
+    // referrer별 raw 집계 버킷
+    const byRef = {};
+    const totalBucket = {
+      totalVisits:   Array(24).fill(0),
+      visitorSets:   Array.from({ length: 24 }, () => new Set()),
+      signups:       Array(24).fill(0),
+      purchaserSets: Array.from({ length: 24 }, () => new Set()),
+      purchaseCount: Array(24).fill(0),
+      revenue:       Array(24).fill(0),
+    };
+    const sessionRefMap = {}; // session_id → referrer
+
+    const getOrCreateBucket = (ref) => {
+      if (!byRef[ref]) {
+        byRef[ref] = {
+          totalVisits:   Array(24).fill(0),
+          visitorSets:   Array.from({ length: 24 }, () => new Set()),
+          signups:       Array(24).fill(0),
+          purchaserSets: Array.from({ length: 24 }, () => new Set()),
+          purchaseCount: Array(24).fill(0),
+          revenue:       Array(24).fill(0),
+        };
+      }
+      return byRef[ref];
+    };
+
+    const rows = data || [];
+
+    // Pass 1: pageview
+    rows
+      .filter((e) => e.event_type === 'pageview')
+      .forEach((e) => {
+        const ref  = extractDomain(e.page_referrer);
+        if (referrers && !referrers.includes(ref)) return;
+        const hour = kstHour(e.created_at);
+        const bkt  = getOrCreateBucket(ref);
+
+        bkt.totalVisits[hour]++;
+        totalBucket.totalVisits[hour]++;
+        if (e.visitor_id) {
+          bkt.visitorSets[hour].add(e.visitor_id);
+          totalBucket.visitorSets[hour].add(e.visitor_id);
+        }
+        if (!sessionRefMap[e.session_id]) sessionRefMap[e.session_id] = ref;
+      });
+
+    // Pass 2: signup / purchase (세션 referrer 귀속)
+    rows
+      .filter((e) => e.event_type === 'signup' || e.event_type === 'purchase')
+      .forEach((e) => {
+        const ref  = sessionRefMap[e.session_id] || '직접 유입';
+        if (referrers && !referrers.includes(ref)) return;
+        const hour = kstHour(e.created_at);
+        const bkt  = getOrCreateBucket(ref);
+
+        if (e.event_type === 'signup') {
+          bkt.signups[hour]++;
+          totalBucket.signups[hour]++;
+        }
+        if (e.event_type === 'purchase') {
+          const val = parseFloat(e.value || 0);
+          bkt.purchaseCount[hour]++;
+          bkt.revenue[hour] += val;
+          totalBucket.purchaseCount[hour]++;
+          totalBucket.revenue[hour] += val;
+          if (e.visitor_id) {
+            bkt.purchaserSets[hour].add(e.visitor_id);
+            totalBucket.purchaserSets[hour].add(e.visitor_id);
+          }
+        }
+      });
+
+    // 버킷 → 최종 지표 배열 변환
+    const toMetrics = (bkt) => {
+      const visitors      = bkt.visitorSets.map((s) => s.size);
+      const purchasers    = bkt.purchaserSets.map((s) => s.size);
+      const purchaseCount = bkt.purchaseCount;
+      const revenue       = bkt.revenue.map((v) => Math.round(v));
+      return {
+        totalVisits:            bkt.totalVisits,
+        visitors,
+        signups:                bkt.signups,
+        purchasers,
+        purchaseCount,
+        revenue,
+        purchaseConversionRate: visitors.map((v, i) =>
+          v > 0 ? +((purchaseCount[i] / v) * 100).toFixed(2) : 0
+        ),
+        avgOrderValue: purchaseCount.map((c, i) =>
+          c > 0 ? Math.round(revenue[i] / c) : 0
+        ),
+      };
+    };
+
+    const result = { '합계': toMetrics(totalBucket) };
+    Object.entries(byRef).forEach(([ref, bkt]) => {
+      result[ref] = toMetrics(bkt);
+    });
+    return result;
+  } catch (error) {
+    console.error('[ZA Service] getReferrerHourlyData error:', error);
     throw error;
   }
 };
