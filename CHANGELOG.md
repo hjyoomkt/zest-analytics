@@ -1,5 +1,63 @@
 # Changelog
 
+## [4.6.8] 2026-04-06
+
+### 클릭 히트맵 탭 — "서비스 준비중" 알럿 처리
+
+**`src/views/admin/zestAnalytics/components/HeatmapViewer.jsx`**
+- 클릭 히트맵 탭 클릭 시 `alert('클릭 히트맵은 현재 서비스 준비중입니다.')` 표시 후 탭 전환 차단
+- 기존 클릭 히트맵 UI는 코드 내 보존, 실제 탭 전환은 불가
+
+---
+
+## [4.6.7] 2026-04-06
+
+### 클릭 히트맵 기능 구축 (UI 완성 / 수집 비활성)
+
+#### 구축 내용
+
+**`src/views/admin/zestAnalytics/components/HeatmapViewer.jsx`**
+- 상단 모드 토글 추가: **스크롤 히트맵** / **클릭 히트맵** 탭
+- 클릭 히트맵 모드:
+  - iframe 위 canvas 절대 위치 오버레이 (가우시안 블러 COLD→HOT 렌더링)
+  - 우측 패널: 총 클릭 수, 클릭된 요소 종류, **많이 클릭된 요소 TOP 10** 리스트 (진행 바 포함)
+
+**`src/views/admin/zestAnalytics/services/zaService.js`**
+- `getClickHeatmap()` 추가 — `za_click_events` 테이블에서 좌표 목록 조회
+- `getClickTopElements()` 추가 — element_selector 기준 그룹핑, 클릭 수 TOP N 반환
+
+**`src/views/admin/zestAnalytics/sdk/index.js`**
+- `_trackClick(e)` 메서드 추가 — 클릭 좌표(뷰포트 기준 0~1 비율), 요소 태그/텍스트/CSS 경로 수집
+- `_getCssSelector(el)` 메서드 추가 — id > class > tag 순 최대 3단계 경로 생성
+- **현재 수집 비활성화** (`init()` 내 이벤트 리스너 주석 처리)
+
+**`za-collect-event.ts`**
+- `validEventTypes`에 `'click'` 추가
+- `click` 이벤트 수신 시 `za_click_events` 테이블로 분기 INSERT
+
+#### Supabase 변경사항
+
+- `za_click_events` 테이블 신규 생성
+- RLS 활성화 + 3개 SELECT 정책 추가 (`za_events`와 동일 구조):
+  - `Advertiser can view own click events`
+  - `Agency can view organization click events`
+  - `Master can view all click events`
+
+#### ⚠️ 클릭 수집 비활성화 사유 및 현황
+
+**사유**: iframe 기반 canvas 오버레이의 구조적 한계
+1. **좌표 불일치** — SDK는 실제 사이트 뷰포트(예: 1920px) 기준으로 기록하지만, iframe은 대시보드 컨테이너 너비(약 800px)에 맞춰 렌더링되어 좌표가 어긋남
+2. **스크롤 desync** — canvas는 iframe 위 고정 오버레이라 iframe 내부 스크롤 시 클릭 점이 화면과 함께 이동하지 않음
+
+**현황**:
+- SDK `_trackClick`, `_getCssSelector` 코드는 완성 상태로 보존
+- `init()` 내 `window.addEventListener('click', ...)` 한 줄 주석 처리로 수집 중단
+- 재활성화: 주석 1줄 해제 후 `node sdk/build.js` + CDN 배포
+
+**향후 방향** (미결): iframe 방식 대신 독립 canvas 좌표 분포도 또는 세션 리플레이 방식으로 재설계 필요
+
+---
+
 ## [4.6.6] 2026-04-06
 
 ### /admin/zest-analytics — 사용자수 집계 버그 수정 및 채널명 개선

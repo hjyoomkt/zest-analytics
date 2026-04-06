@@ -91,8 +91,11 @@
       // 초기 로드 시 스크롤 위치 반영 (긴 페이지에서 앵커 링크 진입 등)
       this._trackScrollDepth();
 
-      // 클릭 히트맵 수집
-      window.addEventListener('click', (e) => this._trackClick(e), { passive: true });
+      // ── [클릭 히트맵] 클릭 수집 — 좌표계 문제로 비활성화 ──────────────
+      // 문제: iframe 뷰포트 vs 실제 사이트 뷰포트 불일치 + iframe 스크롤 desync
+      // 해결 방식 결정 후 아래 주석 해제
+      // window.addEventListener('click', (e) => this._trackClick(e), { passive: true });
+      // ───────────────────────────────────────────────────────────────────
 
       // GA 스타일 세션 추적
       this.activeStartTime = Date.now();

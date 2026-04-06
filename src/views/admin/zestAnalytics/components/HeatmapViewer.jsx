@@ -269,7 +269,13 @@ export default function HeatmapViewer({
           <Button
             key={key}
             size="sm"
-            onClick={() => setHeatmapMode(key)}
+            onClick={() => {
+              if (key === 'click') {
+                alert('클릭 히트맵은 현재 서비스 준비중입니다.');
+                return;
+              }
+              setHeatmapMode(key);
+            }}
             bg={heatmapMode === key ? 'brand.500' : cardBg}
             color={heatmapMode === key ? 'white' : textColor}
             border="1px solid"

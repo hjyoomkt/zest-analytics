@@ -555,11 +555,12 @@ src/assets/
 | `src/views/admin/zestAnalytics/services/zaService.js` | Supabase API 서비스 |
 | `src/views/admin/zestAnalytics/components/EventStatistics.jsx` | KPI 카드 |
 | `src/views/admin/zestAnalytics/components/ChannelAnalytics.jsx` | GA 스타일 채널·소스·미디엄·캠페인 분석 테이블 (열 선택, 정렬, 캐시) |
+| `src/views/admin/zestAnalytics/components/HeatmapViewer.jsx` | 스크롤/클릭 히트맵 뷰어. 탭 토글(스크롤·클릭), 클릭 히트맵 UI 완성. **클릭 수집 비활성화** (SDK 주석 처리) |
 | `src/views/admin/zestAnalytics/components/AttributionAnalysis.jsx` | 어트리뷰션 분석 ※ 미사용 |
 | `src/views/admin/zestAnalytics/components/CampaignPerformance.jsx` | 캠페인 성과 테이블 ※ 미사용 |
 | `src/views/admin/zestAnalytics/components/TrackingCodeManager.jsx` | 추적 코드 관리 (superadmin/clientadmin에서 사용) |
-| `src/views/admin/zestAnalytics/sdk/index.js` | 광고주용 JS SDK |
-| `src/views/admin/zestAnalytics/sdk/build.js` | SDK 빌드 스크립트 |
+| `src/views/admin/zestAnalytics/sdk/index.js` | 광고주용 JS SDK. `_trackClick`, `_getCssSelector` 메서드 구현 완료. **클릭 이벤트 리스너 주석 처리 — 수집 비활성** |
+| `src/views/admin/zestAnalytics/sdk/build.js` | SDK 빌드 스크립트 (src → public/sdk/za-sdk.js 복사) |
 
 **수정된 파일**
 
