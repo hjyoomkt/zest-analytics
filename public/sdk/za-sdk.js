@@ -472,10 +472,9 @@
     _trackClick(e) {
       if (!this.trackingId) return;
 
-      const pageWidth  = Math.max(document.body.scrollWidth,  document.documentElement.scrollWidth,  document.body.offsetWidth);
-      const pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, document.body.offsetHeight);
-      const clickX = pageWidth  > 0 ? (e.pageX / pageWidth)  : 0;
-      const clickY = pageHeight > 0 ? (e.pageY / pageHeight) : 0;
+      // 뷰포트 기준 비율 (0~1) — 캔버스 오버레이와 1:1 대응
+      const clickX = window.innerWidth  > 0 ? (e.clientX / window.innerWidth)  : 0;
+      const clickY = window.innerHeight > 0 ? (e.clientY / window.innerHeight) : 0;
 
       const target = e.target;
       const elementTag      = target.tagName ? target.tagName.toLowerCase() : '';
