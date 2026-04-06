@@ -758,6 +758,115 @@ export const getHeatmapPageStats = async ({
 };
 
 // ============================================================================
+// 클릭 히트맵
+// ============================================================================
+
+/**
+ * 특정 페이지의 클릭 좌표 목록 조회
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {Array<string>} params.availableAdvertiserIds
+ * @param {string} params.pageUrl
+ * @param {string} params.startDate - YYYY-MM-DD
+ * @param {string} params.endDate   - YYYY-MM-DD
+ * @param {string|null} params.deviceType - 'desktop'|'mobile'|'tablet'|null
+ * @returns {Promise<Array<{click_x, click_y, click_count}>>}
+ *   click_x / click_y 는 0~1 비율 (페이지 너비/높이 기준)
+ *   데이터가 없으면 빈 배열 반환
+ */
+export const getClickHeatmap = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  pageUrl,
+  startDate,
+  endDate,
+  deviceType = null,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0 || !pageUrl) return [];
+
+    let query = supabase
+      .from('za_click_events')
+      .select('click_x, click_y')
+      .in('advertiser_id', ids)
+      .eq('page_url', pageUrl)
+      .gte('created_at', `${startDate}T00:00:00+09:00`)
+      .lte('created_at', `${endDate}T23:59:59+09:00`);
+
+    if (deviceType) query = query.eq('device_type', deviceType);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return (data || []).map((r) => ({
+      click_x: Number(r.click_x),
+      click_y: Number(r.click_y),
+    }));
+  } catch (error) {
+    console.error('[ZA Service] getClickHeatmap error:', error);
+    throw error;
+  }
+};
+
+/**
+ * 가장 많이 클릭된 요소 TOP N 조회
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {Array<string>} params.availableAdvertiserIds
+ * @param {string} params.pageUrl
+ * @param {string} params.startDate
+ * @param {string} params.endDate
+ * @param {string|null} params.deviceType
+ * @param {number} params.limit - 상위 N개 (기본 10)
+ * @returns {Promise<Array<{element_tag, element_text, element_selector, click_count}>>}
+ */
+export const getClickTopElements = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  pageUrl,
+  startDate,
+  endDate,
+  deviceType = null,
+  limit = 10,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0 || !pageUrl) return [];
+
+    let query = supabase
+      .from('za_click_events')
+      .select('element_tag, element_text, element_selector')
+      .in('advertiser_id', ids)
+      .eq('page_url', pageUrl)
+      .gte('created_at', `${startDate}T00:00:00+09:00`)
+      .lte('created_at', `${endDate}T23:59:59+09:00`);
+
+    if (deviceType) query = query.eq('device_type', deviceType);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    // 클라이언트 측 집계 (selector 기준 그룹핑)
+    const countMap = {};
+    (data || []).forEach((r) => {
+      const key = r.element_selector || `${r.element_tag}:${r.element_text}`;
+      if (!countMap[key]) {
+        countMap[key] = { element_tag: r.element_tag, element_text: r.element_text, element_selector: r.element_selector, click_count: 0 };
+      }
+      countMap[key].click_count += 1;
+    });
+
+    return Object.values(countMap)
+      .sort((a, b) => b.click_count - a.click_count)
+      .slice(0, limit);
+  } catch (error) {
+    console.error('[ZA Service] getClickTopElements error:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
 // 대시보드 KPI 및 트렌드
 // ============================================================================
 

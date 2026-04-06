@@ -12,13 +12,15 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import {
   Box, Flex, Text, Select, Button, ButtonGroup,
-  SimpleGrid, Skeleton, useColorModeValue, Badge, Input,
+  SimpleGrid, Skeleton, useColorModeValue, Badge, Input, Tag,
 } from '@chakra-ui/react';
 import { getKSTToday, getKSTDaysAgo } from 'utils/dateUtils';
 import {
   getHeatmapPageList,
   getScrollHeatmap,
   getHeatmapPageStats,
+  getClickHeatmap,
+  getClickTopElements,
 } from '../services/zaService';
 
 // COLD(파랑) → HOT(빨강) 그라디언트 색상 계산 (0~1)
@@ -75,6 +77,9 @@ export default function HeatmapViewer({
     setActivePreset(preset.label);
   };
 
+  // 히트맵 모드: 'scroll' | 'click'
+  const [heatmapMode, setHeatmapMode] = useState('scroll');
+
   const [deviceTab, setDeviceTab] = useState('all');
   const [pageList, setPageList] = useState([]);
   const [selectedPage, setSelectedPage] = useState('');
@@ -82,6 +87,12 @@ export default function HeatmapViewer({
   const [pageStats, setPageStats] = useState(null);
   const [loadingPages, setLoadingPages] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
+
+  // 클릭 히트맵 상태
+  const [clickPoints, setClickPoints] = useState([]);      // [{click_x, click_y}]
+  const [clickTopElements, setClickTopElements] = useState([]);
+  const [loadingClick, setLoadingClick] = useState(false);
+  const clickCanvasRef = useRef(null);
 
   const iframeRef = useRef(null);
 
@@ -153,8 +164,67 @@ export default function HeatmapViewer({
     }
   }, [advertiserId, availableAdvertiserIds, selectedPage, startDate, endDate, deviceType]);
 
+  // ── 클릭 히트맵 로드 ──────────────────────────────────────────────
+  const loadClickData = useCallback(async () => {
+    if (!selectedPage || !startDate || !endDate) return;
+    setLoadingClick(true);
+    try {
+      const [points, topEls] = await Promise.all([
+        getClickHeatmap({
+          advertiserId,
+          availableAdvertiserIds,
+          pageUrl: selectedPage,
+          startDate,
+          endDate,
+          deviceType,
+        }),
+        getClickTopElements({
+          advertiserId,
+          availableAdvertiserIds,
+          pageUrl: selectedPage,
+          startDate,
+          endDate,
+          deviceType,
+        }),
+      ]);
+      setClickPoints(points);
+      setClickTopElements(topEls);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingClick(false);
+    }
+  }, [advertiserId, availableAdvertiserIds, selectedPage, startDate, endDate, deviceType]);
+
   useEffect(() => { loadPageList(); }, [loadPageList]);
   useEffect(() => { if (selectedPage) loadHeatmapData(); }, [loadHeatmapData]);
+  useEffect(() => { if (selectedPage && heatmapMode === 'click') loadClickData(); }, [loadClickData, heatmapMode, selectedPage]);
+
+  // ── 클릭 Canvas 렌더링 ────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = clickCanvasRef.current;
+    if (!canvas || heatmapMode !== 'click') return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    if (clickPoints.length === 0) return;
+
+    // 가우시안 블러 히트맵: 각 포인트를 radialGradient로 합산
+    const RADIUS = Math.min(W, H) * 0.06; // 반경 6%
+    clickPoints.forEach(({ click_x, click_y }) => {
+      const x = click_x * W;
+      const y = click_y * H;
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, RADIUS);
+      grad.addColorStop(0,   'rgba(255,0,0,0.18)');
+      grad.addColorStop(0.4, 'rgba(255,165,0,0.08)');
+      grad.addColorStop(1,   'rgba(0,0,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }, [clickPoints, heatmapMode]);
 
   // ── SDK postMessage 수신 → iframe 페이지 전환 감지 ────────────────
   useEffect(() => {
@@ -190,6 +260,30 @@ export default function HeatmapViewer({
 
   return (
     <Box>
+      {/* ── 히트맵 모드 탭 ── */}
+      <Flex mb="16px" gap="8px">
+        {[
+          { key: 'scroll', label: '스크롤 히트맵' },
+          { key: 'click',  label: '클릭 히트맵'  },
+        ].map(({ key, label }) => (
+          <Button
+            key={key}
+            size="sm"
+            onClick={() => setHeatmapMode(key)}
+            bg={heatmapMode === key ? 'brand.500' : cardBg}
+            color={heatmapMode === key ? 'white' : textColor}
+            border="1px solid"
+            borderColor={heatmapMode === key ? 'brand.500' : borderColor}
+            borderRadius="full"
+            px="20px"
+            fontWeight={heatmapMode === key ? '700' : '400'}
+            _hover={{ bg: heatmapMode === key ? 'brand.600' : bgColor }}
+          >
+            {label}
+          </Button>
+        ))}
+      </Flex>
+
       {/* ── 필터 바 ── */}
       <Box
         bg={cardBg}
@@ -299,51 +393,187 @@ export default function HeatmapViewer({
       </Box>
 
       {/* ── 메인 콘텐츠 ── */}
-      <Flex gap="20px" align="flex-start" wrap={{ base: 'wrap', xl: 'nowrap' }}>
-        {/* ── 좌측: iframe + 수직 히트맵 바 ── */}
-        <Box
-          flex="1"
-          minW={{ base: '100%', xl: '0' }}
-          bg={cardBg}
-          border="1px solid"
-          borderColor={borderColor}
-          borderRadius="16px"
-          overflow="hidden"
-        >
-          {/* 페이지 URL 헤더 */}
-          <Flex px="16px" py="10px" borderBottom="1px solid" borderColor={borderColor} align="center" justify="space-between">
-            <Text fontSize="13px" color={subTextColor} noOfLines={1} flex="1" mr="8px">
-              {selectedPage ? (
-                <>
-                  <Text as="span" fontWeight="600" color={textColor}>
-                    {(() => {
-                      try { return new URL(selectedPage).hostname; } catch { return ''; }
-                    })()}
-                  </Text>
-                  <Text as="span">
-                    {(() => {
-                      try { return new URL(selectedPage).pathname + new URL(selectedPage).search; } catch { return selectedPage; }
-                    })()}
-                  </Text>
-                </>
-              ) : '페이지를 선택하세요'}
-            </Text>
-            <Text fontSize="12px" color={subTextColor}>{startDate}</Text>
-          </Flex>
+      {heatmapMode === 'scroll' ? (
+        /* ════════════ 스크롤 히트맵 ════════════ */
+        <Flex gap="20px" align="flex-start" wrap={{ base: 'wrap', xl: 'nowrap' }}>
+          {/* 좌측: iframe + 수직 히트맵 바 */}
+          <Box
+            flex="1"
+            minW={{ base: '100%', xl: '0' }}
+            bg={cardBg}
+            border="1px solid"
+            borderColor={borderColor}
+            borderRadius="16px"
+            overflow="hidden"
+          >
+            <Flex px="16px" py="10px" borderBottom="1px solid" borderColor={borderColor} align="center" justify="space-between">
+              <Text fontSize="13px" color={subTextColor} noOfLines={1} flex="1" mr="8px">
+                {selectedPage ? (
+                  <>
+                    <Text as="span" fontWeight="600" color={textColor}>
+                      {(() => { try { return new URL(selectedPage).hostname; } catch { return ''; } })()}
+                    </Text>
+                    <Text as="span">
+                      {(() => { try { return new URL(selectedPage).pathname + new URL(selectedPage).search; } catch { return selectedPage; } })()}
+                    </Text>
+                  </>
+                ) : '페이지를 선택하세요'}
+              </Text>
+              <Text fontSize="12px" color={subTextColor}>{startDate}</Text>
+            </Flex>
 
-          {/* iframe + canvas 오버레이 */}
-          <Flex>
-            {/* iframe 영역 */}
-            <Box flex="1" minH="600px" bg="white">
+            <Flex>
+              <Box flex="1" minH="600px" bg="white">
+                {selectedPage ? (
+                  <Box
+                    as="iframe"
+                    ref={iframeRef}
+                    src={iframeUrl}
+                    width="100%"
+                    height="600px"
+                    border="none"
+                    title="page-preview"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                  />
+                ) : (
+                  <Flex align="center" justify="center" h="600px" color={subTextColor}>
+                    <Text>좌측 드롭다운에서 페이지를 선택하세요</Text>
+                  </Flex>
+                )}
+              </Box>
+
+              {/* 수직 스크롤 분포 바 */}
+              <Box w="56px" h="600px" position="relative" borderLeft="1px solid" borderColor={borderColor} flexShrink={0}>
+                <Text position="absolute" top="4px" left="50%" transform="translateX(-50%)" fontSize="9px" color="red.400" fontWeight="700" letterSpacing="0.5px">HOT</Text>
+                <Text position="absolute" bottom="4px" left="50%" transform="translateX(-50%)" fontSize="9px" color="blue.400" fontWeight="700" letterSpacing="0.5px">COLD</Text>
+                {loadingData ? (
+                  <Skeleton w="100%" h="100%" />
+                ) : (
+                  (heatmapData || Array(10).fill({ reach_pct: 0 })).map((d, i) => {
+                    const ratio = (d.reach_pct || 0) / 100;
+                    return (
+                      <Box
+                        key={i}
+                        position="absolute"
+                        left="0" right="0"
+                        top={`${i * 10}%`}
+                        height="10%"
+                        bg={heatColor(ratio)}
+                        title={`스크롤 ${i * 10}~${(i + 1) * 10}%: ${d.reach_pct || 0}% 도달`}
+                        cursor="pointer"
+                      />
+                    );
+                  })
+                )}
+              </Box>
+            </Flex>
+
+            <Flex px="16px" py="10px" align="center" gap="8px" borderTop="1px solid" borderColor={borderColor}>
+              <Text fontSize="11px" color="blue.400" fontWeight="600">COLD</Text>
+              <Box flex="1" h="8px" borderRadius="4px" bgGradient="linear(to-r, blue.300, yellow.300, red.400)" />
+              <Text fontSize="11px" color="red.400" fontWeight="600">HOT</Text>
+            </Flex>
+          </Box>
+
+          {/* 우측: 통계 카드 */}
+          <Box w={{ base: '100%', xl: '320px' }} flexShrink={0}>
+            <SimpleGrid columns={2} spacing="12px" mb="12px">
+              {[
+                { label: '이 페이지 방문자', value: loadingData ? null : (pageStats?.visitors ?? '-') },
+                { label: '페이지뷰', value: loadingData ? null : (pageStats?.pageviews ?? '-') },
+                { label: '평균 도달률', value: loadingData ? null : (pageStats ? `${pageStats.avgScrollDepth}%` : '-') },
+                { label: '세션 수', value: loadingData ? null : (pageStats?.totalSessions ?? '-') },
+              ].map(({ label, value }) => (
+                <Box key={label} bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px">
+                  <Text fontSize="12px" color={subTextColor} mb="4px">{label}</Text>
+                  {value === null ? <Skeleton h="28px" borderRadius="6px" /> : <Text fontSize="24px" fontWeight="700" color={textColor}>{value}</Text>}
+                </Box>
+              ))}
+            </SimpleGrid>
+
+            <Box bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px" mb="12px">
+              <Flex align="center" justify="space-between" mb="12px">
+                <Text fontSize="14px" fontWeight="600" color={textColor}>도달 구간</Text>
+                <Badge colorScheme={deviceTab === 'pc' ? 'blue' : deviceTab === 'mo' ? 'green' : 'gray'} borderRadius="full" px="8px" fontSize="10px">
+                  {deviceTab === 'all' ? '전체' : deviceTab.toUpperCase()}
+                </Badge>
+              </Flex>
+              <SimpleGrid columns={2} spacing="12px">
+                {[
+                  { label: '25% 이상', pct: pageStats?.reach25, sessions: pageStats ? Math.round((pageStats.reach25 / 100) * pageStats.totalSessions) : 0 },
+                  { label: '50% 이상', pct: pageStats?.reach50, sessions: pageStats ? Math.round((pageStats.reach50 / 100) * pageStats.totalSessions) : 0 },
+                  { label: '75% 이상', pct: pageStats?.reach75, sessions: pageStats ? Math.round((pageStats.reach75 / 100) * pageStats.totalSessions) : 0 },
+                  { label: '100% 이상', pct: pageStats?.reach100, sessions: pageStats ? Math.round((pageStats.reach100 / 100) * pageStats.totalSessions) : 0 },
+                ].map(({ label, pct, sessions }) => (
+                  <Box key={label}>
+                    <Text fontSize="11px" color={subTextColor} mb="2px">{label}</Text>
+                    {loadingData ? <Skeleton h="24px" borderRadius="4px" /> : (
+                      <>
+                        <Text fontSize="20px" fontWeight="700" color={reachColor(pct ?? 0)}>{pct ?? 0}%</Text>
+                        <Text fontSize="11px" color={subTextColor}>{sessions}명</Text>
+                      </>
+                    )}
+                  </Box>
+                ))}
+              </SimpleGrid>
+            </Box>
+
+            <Box bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px">
+              <Flex align="center" justify="space-between" mb="8px">
+                <Text fontSize="14px" fontWeight="600" color={textColor}>도달률 추이</Text>
+                <Text fontSize="11px" color={subTextColor}>
+                  {selectedPage ? (() => { try { return new URL(selectedPage).pathname; } catch { return ''; } })() : ''}
+                </Text>
+              </Flex>
+              <TrendChart data={trendPoints} loading={loadingData} />
+              <Flex justify="space-between" mt="4px">
+                <Text fontSize="10px" color={subTextColor}>0%</Text>
+                <Text fontSize="10px" color={subTextColor}>100%</Text>
+              </Flex>
+            </Box>
+          </Box>
+        </Flex>
+      ) : (
+        /* ════════════ 클릭 히트맵 ════════════ */
+        <Flex gap="20px" align="flex-start" wrap={{ base: 'wrap', xl: 'nowrap' }}>
+          {/* 좌측: iframe + canvas 오버레이 */}
+          <Box
+            flex="1"
+            minW={{ base: '100%', xl: '0' }}
+            bg={cardBg}
+            border="1px solid"
+            borderColor={borderColor}
+            borderRadius="16px"
+            overflow="hidden"
+          >
+            <Flex px="16px" py="10px" borderBottom="1px solid" borderColor={borderColor} align="center" justify="space-between">
+              <Text fontSize="13px" color={subTextColor} noOfLines={1} flex="1" mr="8px">
+                {selectedPage ? (
+                  <>
+                    <Text as="span" fontWeight="600" color={textColor}>
+                      {(() => { try { return new URL(selectedPage).hostname; } catch { return ''; } })()}
+                    </Text>
+                    <Text as="span">
+                      {(() => { try { return new URL(selectedPage).pathname + new URL(selectedPage).search; } catch { return selectedPage; } })()}
+                    </Text>
+                  </>
+                ) : '페이지를 선택하세요'}
+              </Text>
+              <Text fontSize="12px" color={subTextColor}>
+                {loadingClick ? '로딩 중...' : `${clickPoints.length}개 클릭`}
+              </Text>
+            </Flex>
+
+            {/* iframe + canvas 오버레이 */}
+            <Box position="relative" minH="600px" bg="white">
               {selectedPage ? (
                 <Box
                   as="iframe"
-                  ref={iframeRef}
                   src={iframeUrl}
                   width="100%"
                   height="600px"
                   border="none"
-                  title="page-preview"
+                  title="page-preview-click"
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
                 />
               ) : (
@@ -351,174 +581,135 @@ export default function HeatmapViewer({
                   <Text>좌측 드롭다운에서 페이지를 선택하세요</Text>
                 </Flex>
               )}
-            </Box>
-
-            {/* 수직 스크롤 분포 바 */}
-            <Box
-              w="56px"
-              h="600px"
-              position="relative"
-              borderLeft="1px solid"
-              borderColor={borderColor}
-              flexShrink={0}
-            >
-              {/* COLD→HOT 레이블 */}
-              <Text
-                position="absolute"
-                top="4px"
-                left="50%"
-                transform="translateX(-50%)"
-                fontSize="9px"
-                color="red.400"
-                fontWeight="700"
-                letterSpacing="0.5px"
-              >
-                HOT
-              </Text>
-              <Text
-                position="absolute"
-                bottom="4px"
-                left="50%"
-                transform="translateX(-50%)"
-                fontSize="9px"
-                color="blue.400"
-                fontWeight="700"
-                letterSpacing="0.5px"
-              >
-                COLD
-              </Text>
-
-              {/* 구간별 색상 슬롯 (상단=0%구간이 HOT 가능성 높음) */}
-              {loadingData ? (
-                <Skeleton w="100%" h="100%" />
-              ) : (
-                (heatmapData || Array(10).fill({ reach_pct: 0 })).map((d, i) => {
-                  const ratio = (d.reach_pct || 0) / 100;
-                  return (
-                    <Box
-                      key={i}
-                      position="absolute"
-                      left="0"
-                      right="0"
-                      top={`${i * 10}%`}
-                      height="10%"
-                      bg={heatColor(ratio)}
-                      title={`스크롤 ${i * 10}~${(i + 1) * 10}%: ${d.reach_pct || 0}% 도달`}
-                      cursor="pointer"
-                    />
-                  );
-                })
+              {/* 클릭 히트맵 캔버스 오버레이 */}
+              {selectedPage && (
+                <Box
+                  as="canvas"
+                  ref={clickCanvasRef}
+                  width={800}
+                  height={600}
+                  position="absolute"
+                  top="0"
+                  left="0"
+                  w="100%"
+                  h="600px"
+                  pointerEvents="none"
+                  style={{ mixBlendMode: 'multiply' }}
+                />
+              )}
+              {loadingClick && (
+                <Flex
+                  position="absolute"
+                  top="0" left="0" right="0" bottom="0"
+                  align="center"
+                  justify="center"
+                  bg="blackAlpha.200"
+                >
+                  <Text fontSize="14px" color="white" fontWeight="600" bg="blackAlpha.600" px="16px" py="8px" borderRadius="8px">
+                    클릭 데이터 로딩 중...
+                  </Text>
+                </Flex>
               )}
             </Box>
-          </Flex>
 
-          {/* COLD→HOT 범례 */}
-          <Flex px="16px" py="10px" align="center" gap="8px" borderTop="1px solid" borderColor={borderColor}>
-            <Text fontSize="11px" color="blue.400" fontWeight="600">COLD</Text>
-            <Box
-              flex="1"
-              h="8px"
-              borderRadius="4px"
-              bgGradient="linear(to-r, blue.300, yellow.300, red.400)"
-            />
-            <Text fontSize="11px" color="red.400" fontWeight="600">HOT</Text>
-          </Flex>
-        </Box>
-
-        {/* ── 우측: 통계 카드 ── */}
-        <Box w={{ base: '100%', xl: '320px' }} flexShrink={0}>
-          {/* KPI 카드 2x2 */}
-          <SimpleGrid columns={2} spacing="12px" mb="12px">
-            {[
-              { label: '이 페이지 방문자', value: loadingData ? null : (pageStats?.visitors ?? '-') },
-              { label: '페이지뷰', value: loadingData ? null : (pageStats?.pageviews ?? '-') },
-              { label: '평균 도달률', value: loadingData ? null : (pageStats ? `${pageStats.avgScrollDepth}%` : '-') },
-              { label: '세션 수', value: loadingData ? null : (pageStats?.totalSessions ?? '-') },
-            ].map(({ label, value }) => (
-              <Box
-                key={label}
-                bg={cardBg}
-                border="1px solid"
-                borderColor={borderColor}
-                borderRadius="16px"
-                p="16px"
-              >
-                <Text fontSize="12px" color={subTextColor} mb="4px">{label}</Text>
-                {value === null ? (
-                  <Skeleton h="28px" borderRadius="6px" />
-                ) : (
-                  <Text fontSize="24px" fontWeight="700" color={textColor}>{value}</Text>
-                )}
-              </Box>
-            ))}
-          </SimpleGrid>
-
-          {/* 도달 구간 카드 */}
-          <Box
-            bg={cardBg}
-            border="1px solid"
-            borderColor={borderColor}
-            borderRadius="16px"
-            p="16px"
-            mb="12px"
-          >
-            <Flex align="center" justify="space-between" mb="12px">
-              <Text fontSize="14px" fontWeight="600" color={textColor}>도달 구간</Text>
-              <Badge
-                colorScheme={deviceTab === 'pc' ? 'blue' : deviceTab === 'mo' ? 'green' : 'gray'}
-                borderRadius="full"
-                px="8px"
-                fontSize="10px"
-              >
-                {deviceTab === 'all' ? '전체' : deviceTab.toUpperCase()}
-              </Badge>
+            {/* 범례 */}
+            <Flex px="16px" py="10px" align="center" gap="8px" borderTop="1px solid" borderColor={borderColor}>
+              <Text fontSize="11px" color="blue.400" fontWeight="600">적음</Text>
+              <Box flex="1" h="8px" borderRadius="4px" bgGradient="linear(to-r, blue.200, yellow.300, red.500)" />
+              <Text fontSize="11px" color="red.400" fontWeight="600">많음</Text>
             </Flex>
-            <SimpleGrid columns={2} spacing="12px">
+          </Box>
+
+          {/* 우측: 클릭 통계 */}
+          <Box w={{ base: '100%', xl: '320px' }} flexShrink={0}>
+            {/* 총 클릭 수 카드 */}
+            <SimpleGrid columns={2} spacing="12px" mb="12px">
               {[
-                { label: '25% 이상', pct: pageStats?.reach25, sessions: pageStats ? Math.round((pageStats.reach25 / 100) * pageStats.totalSessions) : 0 },
-                { label: '50% 이상', pct: pageStats?.reach50, sessions: pageStats ? Math.round((pageStats.reach50 / 100) * pageStats.totalSessions) : 0 },
-                { label: '75% 이상', pct: pageStats?.reach75, sessions: pageStats ? Math.round((pageStats.reach75 / 100) * pageStats.totalSessions) : 0 },
-                { label: '100% 이상', pct: pageStats?.reach100, sessions: pageStats ? Math.round((pageStats.reach100 / 100) * pageStats.totalSessions) : 0 },
-              ].map(({ label, pct, sessions }) => (
-                <Box key={label}>
-                  <Text fontSize="11px" color={subTextColor} mb="2px">{label}</Text>
-                  {loadingData ? (
-                    <Skeleton h="24px" borderRadius="4px" />
-                  ) : (
-                    <>
-                      <Text fontSize="20px" fontWeight="700" color={reachColor(pct ?? 0)}>
-                        {pct ?? 0}%
-                      </Text>
-                      <Text fontSize="11px" color={subTextColor}>{sessions}명</Text>
-                    </>
-                  )}
+                { label: '총 클릭 수', value: loadingClick ? null : clickPoints.length },
+                { label: '클릭된 요소 종류', value: loadingClick ? null : clickTopElements.length },
+              ].map(({ label, value }) => (
+                <Box key={label} bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px">
+                  <Text fontSize="12px" color={subTextColor} mb="4px">{label}</Text>
+                  {value === null ? <Skeleton h="28px" borderRadius="6px" /> : <Text fontSize="24px" fontWeight="700" color={textColor}>{value}</Text>}
                 </Box>
               ))}
             </SimpleGrid>
-          </Box>
 
-          {/* 도달률 추이 미니 차트 (SVG 라인) */}
-          <Box
-            bg={cardBg}
-            border="1px solid"
-            borderColor={borderColor}
-            borderRadius="16px"
-            p="16px"
-          >
-            <Flex align="center" justify="space-between" mb="8px">
-              <Text fontSize="14px" fontWeight="600" color={textColor}>도달률 추이</Text>
-              <Text fontSize="11px" color={subTextColor}>
-                {selectedPage ? (() => { try { return new URL(selectedPage).pathname; } catch { return ''; } })() : ''}
-              </Text>
-            </Flex>
-            <TrendChart data={trendPoints} loading={loadingData} />
-            <Flex justify="space-between" mt="4px">
-              <Text fontSize="10px" color={subTextColor}>0%</Text>
-              <Text fontSize="10px" color={subTextColor}>100%</Text>
-            </Flex>
+            {/* 많이 클릭된 요소 TOP 10 */}
+            <Box bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px">
+              <Flex align="center" justify="space-between" mb="12px">
+                <Text fontSize="14px" fontWeight="600" color={textColor}>많이 클릭된 요소</Text>
+                <Badge colorScheme={deviceTab === 'pc' ? 'blue' : deviceTab === 'mo' ? 'green' : 'gray'} borderRadius="full" px="8px" fontSize="10px">
+                  {deviceTab === 'all' ? '전체' : deviceTab.toUpperCase()}
+                </Badge>
+              </Flex>
+
+              {loadingClick ? (
+                <Flex direction="column" gap="8px">
+                  {Array(5).fill(0).map((_, i) => <Skeleton key={i} h="48px" borderRadius="8px" />)}
+                </Flex>
+              ) : clickTopElements.length === 0 ? (
+                <Flex align="center" justify="center" h="120px" direction="column" gap="8px">
+                  <Text fontSize="13px" color={subTextColor}>클릭 데이터가 없습니다</Text>
+                  <Text fontSize="11px" color={subTextColor}>SDK 클릭 수집을 활성화해주세요</Text>
+                </Flex>
+              ) : (
+                <Flex direction="column" gap="8px">
+                  {clickTopElements.map((el, i) => {
+                    const maxCount = clickTopElements[0]?.click_count || 1;
+                    const barPct = Math.round((el.click_count / maxCount) * 100);
+                    return (
+                      <Box key={i} position="relative">
+                        {/* 배경 진행 바 */}
+                        <Box
+                          position="absolute"
+                          top="0" left="0" bottom="0"
+                          w={`${barPct}%`}
+                          bg="brand.50"
+                          borderRadius="8px"
+                          transition="width 0.3s"
+                        />
+                        <Flex
+                          position="relative"
+                          align="center"
+                          justify="space-between"
+                          px="10px"
+                          py="8px"
+                          borderRadius="8px"
+                          border="1px solid"
+                          borderColor={borderColor}
+                        >
+                          <Flex align="center" gap="8px" flex="1" minW="0">
+                            <Text fontSize="13px" fontWeight="700" color="brand.500" flexShrink={0}>#{i + 1}</Text>
+                            <Box flex="1" minW="0">
+                              <Flex align="center" gap="4px" mb="2px">
+                                <Tag size="sm" colorScheme="gray" fontSize="10px" px="6px" py="1px" borderRadius="4px">
+                                  {el.element_tag || 'div'}
+                                </Tag>
+                                <Text fontSize="12px" color={textColor} noOfLines={1}>
+                                  {el.element_text || el.element_selector || '(텍스트 없음)'}
+                                </Text>
+                              </Flex>
+                              {el.element_selector && (
+                                <Text fontSize="10px" color={subTextColor} noOfLines={1} fontFamily="mono">
+                                  {el.element_selector}
+                                </Text>
+                              )}
+                            </Box>
+                          </Flex>
+                          <Text fontSize="14px" fontWeight="700" color={textColor} flexShrink={0} ml="8px">
+                            {el.click_count}
+                          </Text>
+                        </Flex>
+                      </Box>
+                    );
+                  })}
+                </Flex>
+              )}
+            </Box>
           </Box>
-        </Box>
-      </Flex>
+        </Flex>
+      )}
     </Box>
   );
 }

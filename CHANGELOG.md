@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.6.6] 2026-04-06
+
+### /admin/zest-analytics — 사용자수 집계 버그 수정 및 채널명 개선
+
+#### zaService.js — `getUTMBreakdown` 사용자수 버그 수정
+
+- **버그**: 사용자수(`users`)를 `session_id` 기준 Set으로 집계하던 로직이 이벤트수와 동일하게 표시되는 문제
+- **원인**: `session_id`가 이벤트마다 고유하게 생성되는 경우 `sessions.size === 이벤트 수`가 됨
+- **수정**: 다른 분석 함수(`getDailyStats`, `getPageStats` 등)와 동일하게 `visitor_id` 기준으로 고유 사용자 집계
+  - select 쿼리에 `visitor_id` 추가
+  - 그룹별 `visitors: new Set()` 추가
+  - `users`, `avgPageviewsPerUser`, `memberConversionRate`, `purchaseConversionRate` 모두 `g.visitors.size` 기준으로 통일
+
+#### ChannelAnalytics.jsx — 채널 표시명 개선
+
+- `referral` 채널 라벨 변경: `'추천'` → `'추천 (외부링크)'`
+  - "추천"이 어떤 유입 채널인지 직관적으로 알기 어려운 문제 개선
+  - 다른 사이트의 링크를 클릭해서 들어온 유입임을 명시
+
+---
+
 ## [4.6.5] 2026-04-06
 
 ### routes.js — 사이드바 순서 변경 및 Data Tables 숨김 처리

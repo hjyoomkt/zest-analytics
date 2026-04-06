@@ -91,6 +91,9 @@
       // 초기 로드 시 스크롤 위치 반영 (긴 페이지에서 앵커 링크 진입 등)
       this._trackScrollDepth();
 
+      // 클릭 히트맵 수집
+      window.addEventListener('click', (e) => this._trackClick(e), { passive: true });
+
       // GA 스타일 세션 추적
       this.activeStartTime = Date.now();
       this.lastInteractionTime = Date.now();
@@ -459,6 +462,62 @@
         return false; // 재방문
       } catch (e) {
         return false;
+      }
+    }
+
+    /**
+     * 클릭 이벤트 추적
+     * @private
+     */
+    _trackClick(e) {
+      if (!this.trackingId) return;
+
+      const pageWidth  = Math.max(document.body.scrollWidth,  document.documentElement.scrollWidth,  document.body.offsetWidth);
+      const pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, document.body.offsetHeight);
+      const clickX = pageWidth  > 0 ? (e.pageX / pageWidth)  : 0;
+      const clickY = pageHeight > 0 ? (e.pageY / pageHeight) : 0;
+
+      const target = e.target;
+      const elementTag      = target.tagName ? target.tagName.toLowerCase() : '';
+      const elementText     = (target.innerText || target.value || target.alt || '').slice(0, 100).trim();
+      const elementSelector = this._getCssSelector(target);
+
+      const payload = {
+        tracking_id:       this.trackingId,
+        event_type:        'click',
+        session_id:        this.sessionId,
+        visitor_id:        this.visitorId,
+        page_url:          window.location.href,
+        click_x:           Math.round(clickX * 10000) / 10000,
+        click_y:           Math.round(clickY * 10000) / 10000,
+        element_tag:       elementTag,
+        element_text:      elementText,
+        element_selector:  elementSelector,
+        viewport_w:        window.innerWidth,
+        viewport_h:        window.innerHeight,
+        ...this._getDeviceInfo(),
+      };
+
+      this._sendEvent(payload);
+    }
+
+    _getCssSelector(el) {
+      try {
+        if (el.id) return `#${el.id}`;
+        const parts = [];
+        let node = el;
+        for (let i = 0; i < 3 && node && node !== document.body; i++) {
+          let selector = node.tagName.toLowerCase();
+          if (node.className) {
+            const cls = [...node.classList].slice(0, 2).join('.');
+            if (cls) selector += `.${cls}`;
+          }
+          parts.unshift(selector);
+          node = node.parentElement;
+        }
+        return parts.join(' > ');
+      } catch (e) {
+        return '';
       }
     }
 

@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const validEventTypes = ['purchase', 'signup', 'lead', 'add_to_cart', 'custom', 'pageview', 'session_end'];
+    const validEventTypes = ['purchase', 'signup', 'lead', 'add_to_cart', 'custom', 'pageview', 'session_end', 'click'];
     if (!validEventTypes.includes(payload.event_type)) {
       return new Response(JSON.stringify({ error: 'Invalid event_type' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -66,6 +66,36 @@ Deno.serve(async (req) => {
     }
 
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || req.headers.get('x-real-ip') || null;
+
+    // 클릭 이벤트 → za_click_events
+    if (payload.event_type === 'click') {
+      const { error: clickInsertError } = await supabaseAdmin.from('za_click_events').insert({
+        tracking_id:      payload.tracking_id,
+        advertiser_id:    trackingCode.advertiser_id,
+        session_id:       payload.session_id || null,
+        visitor_id:       payload.visitor_id || null,
+        page_url:         payload.page_url || null,
+        click_x:          payload.click_x ?? null,
+        click_y:          payload.click_y ?? null,
+        element_tag:      payload.element_tag || null,
+        element_text:     payload.element_text || null,
+        element_selector: payload.element_selector || null,
+        device_type:      payload.device_type || null,
+        viewport_w:       payload.viewport_w || null,
+        viewport_h:       payload.viewport_h || null,
+      });
+
+      if (clickInsertError) {
+        return new Response(JSON.stringify({ error: 'Failed to save click event', details: clickInsertError.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const isPageview = payload.event_type === 'pageview';
     const isSessionEnd = payload.event_type === 'session_end';
     const isConversion = !isPageview && !isSessionEnd;
