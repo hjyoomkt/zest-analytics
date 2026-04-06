@@ -9,6 +9,7 @@ import { Box } from '@chakra-ui/react';
 import { PageHelmet } from 'components/HelmetProvider';
 import { useDateRange } from 'contexts/DateRangeContext';
 import { useAuth } from 'contexts/AuthContext';
+import DateRangePicker from 'components/fields/DateRangePicker';
 import EventStatistics from './components/EventStatistics';
 import ChannelAnalytics from './components/ChannelAnalytics';
 
@@ -25,6 +26,9 @@ export default function ZestAnalytics() {
         description="웹사이트 전환 이벤트 추적 및 분석"
         keywords="전환 추적, 이벤트 분석, UTM 파라미터, 어트리뷰션"
       />
+
+      {/* 날짜 선택 */}
+      <DateRangePicker />
 
       {/* KPI 카드 */}
       <EventStatistics

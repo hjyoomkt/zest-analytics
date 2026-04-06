@@ -9,6 +9,7 @@ import { Box, Text, Flex } from '@chakra-ui/react';
 import { PageHelmet } from 'components/HelmetProvider';
 import { useDateRange } from 'contexts/DateRangeContext';
 import { useAuth } from 'contexts/AuthContext';
+import DateRangePicker from 'components/fields/DateRangePicker';
 import ReferrerChart from './components/ReferrerChart';
 import ReferrerTable from './components/ReferrerTable';
 
@@ -18,6 +19,7 @@ export default function TrafficSource() {
 
   // 선택된 소스(들) - 차트에 표시할 항목
   const [selectedSources, setSelectedSources] = useState(['합계']);
+  const [attributionModel, setAttributionModel] = useState('first_touch');
 
   const availableAdvertiserIds = availableAdvertisers.map((a) => a.id);
 
@@ -52,6 +54,9 @@ export default function TrafficSource() {
         keywords="유입 경로, 레퍼러, 방문자 분석, 전환율"
       />
 
+      {/* 날짜 선택 */}
+      <DateRangePicker />
+
       {/* 시간대별 방문자 차트 */}
       <ReferrerChart
         advertiserId={currentAdvertiserId}
@@ -71,6 +76,8 @@ export default function TrafficSource() {
           endDate={endDate}
           selectedSources={selectedSources}
           onSourceSelect={handleSourceSelect}
+          attributionModel={attributionModel}
+          onAttributionChange={setAttributionModel}
         />
       </Box>
     </Box>

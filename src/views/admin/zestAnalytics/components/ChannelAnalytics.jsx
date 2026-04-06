@@ -16,6 +16,10 @@ import {
   VStack,
   Text,
   Button,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
   Table,
   Thead,
   Tbody,
@@ -43,6 +47,7 @@ import {
   MdSearch,
   MdEmail,
   MdLink,
+  MdKeyboardArrowDown,
 } from 'react-icons/md';
 import { FaFacebook, FaInstagram, FaYoutube, FaTwitter } from 'react-icons/fa';
 import Card from 'components/card/Card';
@@ -50,8 +55,20 @@ import { getUTMBreakdown } from '../services/zaService';
 
 // 컴포넌트 언마운트 후에도 데이터를 유지하는 모듈 레벨 캐시
 const _cache = {};
-const _cacheKey = (advertiserId, startDate, endDate) =>
-  `${advertiserId ?? 'all'}|${startDate}|${endDate}`;
+const _cacheKey = (advertiserId, startDate, endDate, attributionModel) =>
+  `${advertiserId ?? 'all'}|${startDate}|${endDate}|${attributionModel}`;
+
+const ATTRIBUTION_OPTIONS = [
+  { value: 'first_touch', label: '퍼스트터치' },
+  { value: 'visitor',     label: '방문자'     },
+  { value: 'session',     label: '세션'       },
+];
+
+const ATTRIBUTION_USER_LABEL = {
+  first_touch: '사용자수',
+  visitor:     '사용자수*',
+  session:     '세션수',
+};
 
 // ============================================================================
 // 채널/소스 아이콘 설정
@@ -263,8 +280,10 @@ export default function ChannelAnalytics({
   const toast = useToast();
   const { isOpen: isColOpen, onOpen: onColOpen, onClose: onColClose } = useDisclosure();
 
+  const [attributionModel, setAttributionModel] = useState('first_touch');
+
   const [data,       setData]       = useState(() => {
-    const key = _cacheKey(advertiserId, startDate, endDate);
+    const key = _cacheKey(advertiserId, startDate, endDate, 'first_touch');
     return _cache[key] ?? [];
   });
   const [loading,    setLoading]    = useState(false);
@@ -288,10 +307,11 @@ export default function ChannelAnalytics({
   const inputBg      = useColorModeValue('white', 'navy.700');
   const bgHover      = useColorModeValue('secondaryGray.100', 'whiteAlpha.100');
   const popoverBorder = useColorModeValue('gray.200', 'whiteAlpha.100');
+  const dropdownTextColor = useColorModeValue('gray.700', 'white');
+  const dropdownBorderColor = useColorModeValue('gray.300', 'whiteAlpha.300');
 
   const fetchData = useCallback(async () => {
-    const key = _cacheKey(advertiserId, startDate, endDate);
-    // 캐시가 없을 때만 로딩 스피너 표시 (탭 이동 후 복귀 시 깜빡임 방지)
+    const key = _cacheKey(advertiserId, startDate, endDate, attributionModel);
     if (!_cache[key]) setLoading(true);
     try {
       const result = await getUTMBreakdown({
@@ -299,6 +319,7 @@ export default function ChannelAnalytics({
         availableAdvertiserIds,
         startDate,
         endDate,
+        attributionModel,
       });
       _cache[key] = result;
       setData(result);
@@ -307,7 +328,7 @@ export default function ChannelAnalytics({
     } finally {
       setLoading(false);
     }
-  }, [advertiserId, availableAdvertiserIds, startDate, endDate]);
+  }, [advertiserId, availableAdvertiserIds, startDate, endDate, attributionModel]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -328,7 +349,9 @@ export default function ChannelAnalytics({
     return mult * String(aVal).localeCompare(String(bVal));
   });
 
-  const activeMetricCols = METRIC_COLUMNS.filter((c) => visibleCols.includes(c.key));
+  const activeMetricCols = METRIC_COLUMNS
+    .filter((c) => visibleCols.includes(c.key))
+    .map((c) => c.key === 'users' ? { ...c, label: ATTRIBUTION_USER_LABEL[attributionModel] } : c);
 
   // 헤더 "열 저장" 버튼: 현재 적용된 컬럼을 localStorage에 즉시 저장
   const handleSaveCurrentCols = () => {
@@ -405,6 +428,48 @@ export default function ChannelAnalytics({
         </Text>
 
         <Flex gap={2} align="center">
+          {/* 어트리뷰션 기준 선택 */}
+          <Menu>
+            <MenuButton
+              as={Button}
+              rightIcon={<MdKeyboardArrowDown />}
+              bg={inputBg}
+              border="1px solid"
+              borderColor={dropdownBorderColor}
+              color={dropdownTextColor}
+              fontWeight="600"
+              fontSize="xs"
+              _hover={{ bg: bgHover }}
+              _active={{ bg: bgHover }}
+              size="sm"
+              px="10px"
+              borderRadius="8px"
+            >
+              {ATTRIBUTION_OPTIONS.find((o) => o.value === attributionModel)?.label}
+            </MenuButton>
+            <MenuList minW="auto" w="fit-content" px="8px" py="8px" zIndex={2000}>
+              {ATTRIBUTION_OPTIONS.map((opt) => (
+                <MenuItem
+                  key={opt.value}
+                  onClick={() => setAttributionModel(opt.value)}
+                  bg={attributionModel === opt.value ? brandColor : 'transparent'}
+                  color={attributionModel === opt.value ? 'white' : textColor}
+                  _hover={{ bg: attributionModel === opt.value ? brandColor : bgHover }}
+                  fontWeight={attributionModel === opt.value ? '600' : '500'}
+                  fontSize="sm"
+                  px="12px"
+                  py="8px"
+                  borderRadius="8px"
+                  justifyContent="center"
+                  textAlign="center"
+                  minH="auto"
+                >
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </MenuList>
+          </Menu>
+
           {/* 열 저장 버튼 */}
           <Button
             size="sm"

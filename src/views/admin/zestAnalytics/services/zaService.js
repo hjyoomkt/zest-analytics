@@ -184,7 +184,7 @@ export const getEventStatistics = async ({
   endDate,
 }) => {
   try {
-    let query = supabase.from('za_events').select('event_type, value, currency, is_attributed');
+    let query = supabase.from('za_events').select('event_type, value, currency, is_attributed').neq('event_type', 'session_end');
 
     // 날짜 필터
     if (startDate && endDate) {
@@ -940,9 +940,15 @@ export const getDashboardKPIs = async ({
     let returningVisitors = 0;
 
     if (seRows.length > 0 && seRows.some(r => r.is_new_visitor != null)) {
-      // session_end 기준 (세션 수)
-      newVisitors = seRows.filter(r => isNewFn(r.is_new_visitor)).length;
-      returningVisitors = seRows.filter(r => r.is_new_visitor != null && !isNewFn(r.is_new_visitor)).length;
+      // session_end 기준 - visitor_id 고유값으로 집계
+      const visitorNewMap = {};
+      seRows.forEach(r => {
+        if (r.visitor_id && r.is_new_visitor != null && !(r.visitor_id in visitorNewMap)) {
+          visitorNewMap[r.visitor_id] = isNewFn(r.is_new_visitor);
+        }
+      });
+      newVisitors = Object.values(visitorNewMap).filter(v => v === true).length;
+      returningVisitors = Object.values(visitorNewMap).filter(v => v === false).length;
     } else if (pvRows.some(r => r.is_new_visitor != null)) {
       // pageview 기준: visitor당 첫 번째 is_new_visitor 값 사용
       const visitorNewMap = {};
@@ -1288,6 +1294,7 @@ export const getTopReferrers = async ({
   startDate,
   endDate,
   limit = 5,
+  attributionModel = 'first_touch', // 'first_touch' | 'visitor' | 'session'
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
@@ -1298,50 +1305,61 @@ export const getTopReferrers = async ({
 
     const { data, error } = await supabase
       .from('za_events')
-      .select('page_referrer, channel, visitor_id')
+      .select('page_referrer, channel, visitor_id, session_id, created_at')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
       .gte('created_at', startTs)
-      .lte('created_at', endTs);
+      .lte('created_at', endTs)
+      .order('created_at', { ascending: true });
 
     if (error) {
       console.error('[ZA Service] getTopReferrers query error:', error);
       throw error;
     }
 
+    const resolveRef = (row) => {
+      if (row.channel && row.channel.trim() !== '') return row.channel.trim();
+      const raw = row.page_referrer;
+      if (!raw || raw.trim() === '') return '직접 유입';
+      try {
+        const urlStr = raw.startsWith('http') ? raw : `https://${raw}`;
+        return new URL(urlStr).hostname.replace(/^www\./, '');
+      } catch {
+        return raw;
+      }
+    };
+
     const byRef = {};
+    const visitorFirstRef = {}; // first_touch: visitor_id → 최초 ref
+
     (data || []).forEach(row => {
-      // channel 컬럼이 있으면 우선 사용, 없으면 page_referrer 파싱
-      let ref;
-      if (row.channel && row.channel.trim() !== '') {
-        ref = row.channel.trim();
-      } else {
-        const raw = row.page_referrer;
-        if (!raw || raw.trim() === '') {
-          ref = '직접 유입';
-        } else {
-          try {
-            // 프로토콜이 없으면 붙여서 파싱
-            const urlStr = raw.startsWith('http') ? raw : `https://${raw}`;
-            ref = new URL(urlStr).hostname.replace(/^www\./, '');
-          } catch {
-            ref = raw;
-          }
+      const ref = resolveRef(row);
+      if (!byRef[ref]) byRef[ref] = { referrer: ref, visitors: new Set(), sessions: new Set() };
+
+      if (attributionModel === 'first_touch') {
+        if (row.visitor_id && !(row.visitor_id in visitorFirstRef)) {
+          visitorFirstRef[row.visitor_id] = ref;
+          byRef[ref].visitors.add(row.visitor_id);
         }
+      } else if (attributionModel === 'visitor') {
+        if (row.visitor_id) byRef[ref].visitors.add(row.visitor_id);
       }
 
-      if (!byRef[ref]) byRef[ref] = { referrer: ref, visitors: new Set(), count: 0 };
-      if (row.visitor_id) byRef[ref].visitors.add(row.visitor_id);
-      byRef[ref].count += 1;
+      if (row.session_id) byRef[ref].sessions.add(row.session_id);
     });
 
-    const total = Object.values(byRef).reduce((s, r) => s + r.visitors.size, 0);
+    const getCount = (r) => attributionModel === 'session' ? r.sessions.size : r.visitors.size;
+
+    const total = Object.values(byRef).reduce((s, r) => s + getCount(r), 0);
     return Object.values(byRef)
-      .map(r => ({
-        referrer: r.referrer,
-        count: r.visitors.size,
-        pct: total > 0 ? parseFloat(((r.visitors.size / total) * 100).toFixed(1)) : 0,
-      }))
+      .map(r => {
+        const count = getCount(r);
+        return {
+          referrer: r.referrer,
+          count,
+          pct: total > 0 ? parseFloat(((count / total) * 100).toFixed(1)) : 0,
+        };
+      })
       .sort((a, b) => b.count - a.count)
       .slice(0, limit);
   } catch (error) {
@@ -1525,6 +1543,7 @@ export const getUTMBreakdown = async ({
   availableAdvertiserIds,
   startDate,
   endDate,
+  attributionModel = 'first_touch', // 'first_touch' | 'visitor' | 'session'
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
@@ -1533,9 +1552,10 @@ export const getUTMBreakdown = async ({
     let query = supabase
       .from('za_events')
       .select(
-        'visitor_id, session_id, event_type, channel, utm_source, utm_medium, utm_campaign, value, time_on_page, scroll_depth'
+        'visitor_id, session_id, event_type, channel, utm_source, utm_medium, utm_campaign, value, time_on_page, scroll_depth, created_at'
       )
-      .in('advertiser_id', ids);
+      .in('advertiser_id', ids)
+      .order('created_at', { ascending: true });
 
     if (startDate && endDate) {
       query = query
@@ -1549,6 +1569,7 @@ export const getUTMBreakdown = async ({
     const groups = {};
     const sessionGroupMap = {}; // session_id → group key
     const sessionEndEvents = [];
+    const visitorFirstGroup = {}; // first_touch 모드: visitor_id → 최초 그룹 키
 
     const makeKey = (event) =>
       [
@@ -1581,7 +1602,7 @@ export const getUTMBreakdown = async ({
       return groups[key];
     };
 
-    // Pass 1: pageview / 전환 이벤트 집계
+    // Pass 1: pageview / 전환 이벤트 집계 (created_at 오름차순 정렬된 상태)
     (data || []).forEach((event) => {
       if (event.event_type === 'session_end') {
         sessionEndEvents.push(event);
@@ -1590,7 +1611,18 @@ export const getUTMBreakdown = async ({
 
       const key = makeKey(event);
       const g = getOrCreate(key, event);
-      if (event.visitor_id) g.visitors.add(event.visitor_id);
+
+      // 어트리뷰션 모델별 사용자 카운트
+      if (attributionModel === 'first_touch') {
+        if (event.visitor_id && !(event.visitor_id in visitorFirstGroup)) {
+          visitorFirstGroup[event.visitor_id] = key;
+          g.visitors.add(event.visitor_id);
+        }
+      } else if (attributionModel === 'visitor') {
+        if (event.visitor_id) g.visitors.add(event.visitor_id);
+      }
+      // session 모드는 visitors 미사용, sessions.size로 집계
+
       g.sessions.add(event.session_id);
 
       // 세션 → 그룹 키 매핑 (session_end 매칭용)
@@ -1609,7 +1641,6 @@ export const getUTMBreakdown = async ({
     sessionEndEvents.forEach((event) => {
       if (!event.time_on_page || event.time_on_page <= 0) return;
 
-      // session_end는 channel만 있으므로 매핑 먼저 시도, 없으면 channel-only 키
       const key =
         sessionGroupMap[event.session_id] ||
         [event.channel || 'direct', '-', '-', '-'].join('|');
@@ -1622,26 +1653,29 @@ export const getUTMBreakdown = async ({
       g.totalScrollDepth += event.scroll_depth || 0;
     });
 
-    // 최종 결과 배열 변환 및 정렬 (사용자수 내림차순)
+    // 최종 결과 배열 변환 및 정렬
     return Object.values(groups)
-      .map((g) => ({
-        channel:  g.channel,
-        source:   g.source,
-        medium:   g.medium,
-        campaign: g.campaign,
-        users: g.visitors.size,
-        pageviews: g.pageviews,
-        avgPageviewsPerUser: g.visitors.size > 0 ? +(g.pageviews / g.visitors.size).toFixed(2) : 0,
-        avgTimeOnPage: g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
-        avgScrollDepth: g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
-        purchases: g.purchases,
-        revenue: g.revenue,
-        addToCarts: g.addToCarts,
-        signups: g.signups,
-        leads: g.leads,
-        memberConversionRate: g.visitors.size > 0 ? +((g.signups / g.visitors.size) * 100).toFixed(2) : 0,
-        purchaseConversionRate: g.visitors.size > 0 ? +((g.purchases / g.visitors.size) * 100).toFixed(2) : 0,
-      }))
+      .map((g) => {
+        const userCount = attributionModel === 'session' ? g.sessions.size : g.visitors.size;
+        return {
+          channel:  g.channel,
+          source:   g.source,
+          medium:   g.medium,
+          campaign: g.campaign,
+          users: userCount,
+          pageviews: g.pageviews,
+          avgPageviewsPerUser: userCount > 0 ? +(g.pageviews / userCount).toFixed(2) : 0,
+          avgTimeOnPage: g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
+          avgScrollDepth: g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
+          purchases: g.purchases,
+          revenue: g.revenue,
+          addToCarts: g.addToCarts,
+          signups: g.signups,
+          leads: g.leads,
+          memberConversionRate: userCount > 0 ? +((g.signups / userCount) * 100).toFixed(2) : 0,
+          purchaseConversionRate: userCount > 0 ? +((g.purchases / userCount) * 100).toFixed(2) : 0,
+        };
+      })
       .sort((a, b) => b.users - a.users);
   } catch (error) {
     console.error('[ZA Service] getUTMBreakdown error:', error);
@@ -1663,6 +1697,7 @@ export const getReferrerBreakdown = async ({
   availableAdvertiserIds,
   startDate,
   endDate,
+  attributionModel = 'first_touch', // 'first_touch' | 'visitor' | 'session'
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
@@ -1679,7 +1714,8 @@ export const getReferrerBreakdown = async ({
       .in('advertiser_id', ids)
       .in('event_type', ['pageview', 'purchase', 'signup', 'lead', 'add_to_cart', 'session_end'])
       .gte('created_at', startTs)
-      .lte('created_at', endTs);
+      .lte('created_at', endTs)
+      .order('created_at', { ascending: true });
 
     if (error) throw error;
 
@@ -1696,6 +1732,7 @@ export const getReferrerBreakdown = async ({
     const groups = {};
     const sessionRefMap = {};
     const refChannelMap = {};
+    const visitorFirstRef = {}; // first_touch: visitor_id → 최초 ref
 
     const getOrCreate = (ref) => {
       if (!groups[ref]) {
@@ -1704,6 +1741,7 @@ export const getReferrerBreakdown = async ({
           lastUtmChannel: null,
           totalVisits: 0,
           visitors: new Set(),
+          sessions: new Set(),
           pageviews: 0,
           signups: 0,
           purchasers: new Set(),
@@ -1729,7 +1767,17 @@ export const getReferrerBreakdown = async ({
         const g   = getOrCreate(ref);
         g.totalVisits++;
         g.pageviews++;
-        if (event.visitor_id) g.visitors.add(event.visitor_id);
+
+        if (attributionModel === 'first_touch') {
+          if (event.visitor_id && !(event.visitor_id in visitorFirstRef)) {
+            visitorFirstRef[event.visitor_id] = ref;
+            g.visitors.add(event.visitor_id);
+          }
+        } else if (attributionModel === 'visitor') {
+          if (event.visitor_id) g.visitors.add(event.visitor_id);
+        }
+
+        if (event.session_id) g.sessions.add(event.session_id);
         if (!sessionRefMap[event.session_id]) sessionRefMap[event.session_id] = ref;
         if (event.channel) {
           const ts = new Date(event.created_at).getTime();
@@ -1774,24 +1822,27 @@ export const getReferrerBreakdown = async ({
     });
 
     return Object.values(groups)
-      .map((g) => ({
-        source:                 g.source,
-        lastUtmChannel:         g.lastUtmChannel,
-        totalVisits:            g.totalVisits,
-        visitors:               g.visitors.size,
-        pageviews:              g.pageviews,
-        avgTimeOnPage:          g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
-        avgScrollDepth:         g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
-        signups:                g.signups,
-        memberConversionRate:   g.visitors.size > 0 ? +((g.signups / g.visitors.size) * 100).toFixed(2) : 0,
-        purchasers:             g.purchasers.size,
-        purchaseCount:          g.purchaseCount,
-        revenue:                g.revenue,
-        purchaseConversionRate: g.visitors.size > 0 ? +((g.purchaseCount / g.visitors.size) * 100).toFixed(2) : 0,
-        avgOrderValue:          g.purchaseCount > 0 ? Math.round(g.revenue / g.purchaseCount) : 0,
-        addToCarts:             g.addToCarts,
-        leads:                  g.leads,
-      }))
+      .map((g) => {
+        const vc = attributionModel === 'session' ? g.sessions.size : g.visitors.size;
+        return {
+          source:                 g.source,
+          lastUtmChannel:         g.lastUtmChannel,
+          totalVisits:            g.totalVisits,
+          visitors:               vc,
+          pageviews:              g.pageviews,
+          avgTimeOnPage:          g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
+          avgScrollDepth:         g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
+          signups:                g.signups,
+          memberConversionRate:   vc > 0 ? +((g.signups / vc) * 100).toFixed(2) : 0,
+          purchasers:             g.purchasers.size,
+          purchaseCount:          g.purchaseCount,
+          revenue:                g.revenue,
+          purchaseConversionRate: vc > 0 ? +((g.purchaseCount / vc) * 100).toFixed(2) : 0,
+          avgOrderValue:          g.purchaseCount > 0 ? Math.round(g.revenue / g.purchaseCount) : 0,
+          addToCarts:             g.addToCarts,
+          leads:                  g.leads,
+        };
+      })
       .sort((a, b) => b.totalVisits - a.totalVisits);
   } catch (error) {
     console.error('[ZA Service] getReferrerBreakdown error:', error);

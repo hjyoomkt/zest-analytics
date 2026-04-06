@@ -1,11 +1,21 @@
 import React, { useState } from 'react';
 import { useStableFetch } from 'hooks/useStableFetch';
-import { Box, Flex, Text, Skeleton, useColorModeValue } from '@chakra-ui/react';
+import {
+  Box, Flex, Text, Skeleton, useColorModeValue,
+  Button, Menu, MenuButton, MenuList, MenuItem, Icon,
+} from '@chakra-ui/react';
+import { MdKeyboardArrowDown } from 'react-icons/md';
 import ReactApexChart from 'react-apexcharts';
 import Card from 'components/card/Card';
 import { useAuth } from 'contexts/AuthContext';
 import { useDateRange } from 'contexts/DateRangeContext';
 import { getTopReferrers } from 'views/admin/zestAnalytics/services/zaService';
+
+const ATTRIBUTION_OPTIONS = [
+  { value: 'first_touch', label: '퍼스트터치' },
+  { value: 'visitor',     label: '방문자'     },
+  { value: 'session',     label: '세션'       },
+];
 
 const COLORS = ['#4318FF', '#39B8FF', '#6AD2FF', '#E56BF0', '#FFB547'];
 
@@ -14,9 +24,15 @@ export default function TopReferrers() {
   const { startDate, endDate } = useDateRange();
   const [refs, setRefs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [attributionModel, setAttributionModel] = useState('first_touch');
 
   const textColor = useColorModeValue('secondaryGray.900', 'white');
   const subColor = 'secondaryGray.600';
+  const inputBg = useColorModeValue('white', 'navy.700');
+  const borderColor = useColorModeValue('gray.300', 'whiteAlpha.300');
+  const bgHover = useColorModeValue('secondaryGray.100', 'whiteAlpha.100');
+  const dropdownTextColor = useColorModeValue('gray.700', 'white');
+  const brandColor = useColorModeValue('brand.500', 'brand.400');
 
   const fetchData = async () => {
     try {
@@ -28,6 +44,7 @@ export default function TopReferrers() {
         startDate,
         endDate,
         limit: 5,
+        attributionModel,
       });
       setRefs(result);
     } catch (e) {
@@ -37,7 +54,7 @@ export default function TopReferrers() {
     }
   };
 
-  useStableFetch(fetchData, [currentAdvertiserId, availableAdvertisers, startDate, endDate]);
+  useStableFetch(fetchData, [currentAdvertiserId, availableAdvertisers, startDate, endDate, attributionModel]);
 
   const total = refs.reduce((s, r) => s + r.count, 0);
   const series = refs.map(r => r.count);
@@ -72,9 +89,50 @@ export default function TopReferrers() {
 
   return (
     <Card p='20px'>
-      <Text color={textColor} fontSize='md' fontWeight='700' mb='16px'>
-        유입경로 Top5
-      </Text>
+      <Flex justify='space-between' align='center' mb='16px'>
+        <Text color={textColor} fontSize='md' fontWeight='700'>
+          유입경로 Top5
+        </Text>
+        <Menu>
+          <MenuButton
+            as={Button}
+            rightIcon={<Icon as={MdKeyboardArrowDown} />}
+            bg={inputBg}
+            border='1px solid'
+            borderColor={borderColor}
+            color={dropdownTextColor}
+            fontWeight='600'
+            fontSize='xs'
+            _hover={{ bg: bgHover }}
+            _active={{ bg: bgHover }}
+            px='10px'
+            h='36px'
+            borderRadius='8px'
+          >
+            {ATTRIBUTION_OPTIONS.find(o => o.value === attributionModel)?.label}
+          </MenuButton>
+          <MenuList minW='auto' w='fit-content' px='8px' py='8px' zIndex={2000}>
+            {ATTRIBUTION_OPTIONS.map(opt => (
+              <MenuItem
+                key={opt.value}
+                onClick={() => setAttributionModel(opt.value)}
+                bg={attributionModel === opt.value ? brandColor : 'transparent'}
+                color={attributionModel === opt.value ? 'white' : dropdownTextColor}
+                _hover={{ bg: attributionModel === opt.value ? brandColor : bgHover }}
+                fontWeight={attributionModel === opt.value ? '600' : '500'}
+                fontSize='sm'
+                px='12px'
+                py='8px'
+                borderRadius='8px'
+                justifyContent='center'
+                minH='auto'
+              >
+                {opt.label}
+              </MenuItem>
+            ))}
+          </MenuList>
+        </Menu>
+      </Flex>
       {loading ? (
         <Skeleton h='200px' borderRadius='12px' />
       ) : refs.length === 0 ? (

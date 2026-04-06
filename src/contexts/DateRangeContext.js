@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
-import { getKSTNow, getKSTYesterday, getKSTDaysAgo, formatDateToYYYYMMDD } from 'utils/dateUtils';
+import { getKSTNow, getKSTToday, getKSTYesterday, getKSTDaysAgo, formatDateToYYYYMMDD } from 'utils/dateUtils';
 
 const DateRangeContext = createContext();
 
@@ -43,6 +43,12 @@ export const DateRangeProvider = ({ children }) => {
     let start, end;
 
     switch (preset) {
+      case '오늘':
+        return {
+          start: getKSTToday(),
+          end: getKSTToday(),
+        };
+
       case '어제':
         return {
           start: getKSTYesterday(),

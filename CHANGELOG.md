@@ -1,5 +1,103 @@
 # Changelog
 
+## [4.6.10] 2026-04-06
+
+### DateRangePicker — zest-analytics / traffic-source 페이지 추가
+
+**`src/views/admin/zestAnalytics/ZestAnalytics.jsx`**
+- 페이지 상단에 `<DateRangePicker />` 추가
+
+**`src/views/admin/trafficSource/index.jsx`**
+- 페이지 상단에 `<DateRangePicker />` 추가
+
+---
+
+### 어트리뷰션 모델 선택 드롭다운 — 채널 분석 / 유입경로 Top5 / 유입 경로 분석 테이블
+
+세 곳에 **퍼스트터치 / 방문자 / 세션** 기준 선택 드롭다운을 공통 적용:
+- 기본값: `first_touch` (방문자를 최초 유입 채널에만 카운트, 중복 없음)
+- `visitor`: 채널별 고유 visitor_id 카운트 (중복 가능)
+- `session`: 세션 수 기준 카운트 (중복 없음)
+
+**`src/views/admin/zestAnalytics/components/ChannelAnalytics.jsx`**
+- 헤더에 `Menu/MenuButton/MenuItem` 드롭다운 추가 (DateRangePicker 동일 스타일)
+- 선택 기준에 따라 "사용자수 / 사용자수* / 세션수" 컬럼 헤더 동적 변경
+- 캐시 키에 `attributionModel` 포함
+
+**`src/views/admin/default/components/TopReferrers.jsx`**
+- 카드 헤더 우측에 드롭다운 추가
+
+**`src/views/admin/trafficSource/components/ReferrerTable.jsx`**
+- 헤더 버튼 영역에 드롭다운 추가
+- `Menu`, `MenuButton`, `MenuList`, `MenuItem`, `MdKeyboardArrowDown` import 추가
+
+**`src/views/admin/zestAnalytics/services/zaService.js`**
+- `getUTMBreakdown()` — `attributionModel` 파라미터 추가, `created_at` 오름차순 정렬 추가
+- `getTopReferrers()` — `attributionModel` 파라미터 추가, `session_id` / `created_at` select 추가
+- `getReferrerBreakdown()` — `attributionModel` 파라미터 추가, `sessions: new Set()` 집계 추가, `created_at` 오름차순 정렬 추가
+
+---
+
+### 버그 수정 — 총 이벤트 집계에서 session_end 제외
+
+**`src/views/admin/zestAnalytics/services/zaService.js`**
+- `getEventStatistics()` 쿼리에 `.neq('event_type', 'session_end')` 추가
+- session_end 이벤트가 총 이벤트 수에 포함되던 문제 수정
+
+---
+
+### 버그 수정 — 신규/재방문 visitor_id 중복 카운트
+
+**`src/views/admin/zestAnalytics/services/zaService.js`**
+- `getDashboardKPIs()` — session_end 기준 신규/재방문 집계 시 세션 수가 아닌 `visitor_id` 고유값 기준으로 수정
+- 한 명이 여러 세션을 가지면 재방문이 세션 수만큼 카운트되던 문제 수정
+
+---
+
+### UI 개선 — EventStatistics 어트리뷰션 윈도우 레이아웃
+
+**`src/views/admin/zestAnalytics/components/EventStatistics.jsx`**
+- 하단 4개 MiniStatistics 카드(1일/7일/28일 이내 전환, 평균 전환 소요일) → 단일 Card 안에 인라인 가로 나열로 변경
+- `Divider`로 항목 구분, 모든 항목 동일 높이 유지 (`visibility: hidden`으로 빈 sub 텍스트 공간 확보)
+
+---
+
+### UI 개선 — 사이드바 메뉴 텍스트 색상 진하게
+
+**`src/components/sidebar/components/Links.js`**
+- 비활성 메뉴 텍스트 색상: `secondaryGray.500` / `secondaryGray.600` → `gray.600` / `gray.600`
+
+---
+
+## [4.6.9] 2026-04-06
+
+### DateRangePicker — 오늘 프리셋 추가 / KPI 카드 아이콘 스타일 통일
+
+#### DateRangePicker — 오늘 프리셋 추가
+
+**`src/components/fields/DateRangePicker.js`**
+- presets 배열에 `'오늘'` 추가 (`'직접설정'` 다음, `'어제'` 앞)
+
+**`src/contexts/DateRangeContext.js`**
+- `getKSTToday` import 추가
+- `getDateRange` switch에 `'오늘'` case 추가 (start/end 모두 `getKSTToday()`)
+
+---
+
+#### KPI 카드 아이콘 스타일 통일
+
+**`src/views/admin/zestAnalytics/components/EventStatistics.jsx`**
+- 상단 4개 카드(총 이벤트 / 구매 전환 / 회원가입 / 전환 매출) IconBox 변경
+  - 컬러 그라디언트 배경 → `boxBg` (secondaryGray.300 / whiteAlpha.100)
+  - 흰색 아이콘 → `brandColor` Chakra `Icon` 컴포넌트 (32px)
+
+**`src/views/admin/default/index.jsx`**
+- 신규 방문 카드 IconBox 변경
+  - 블루 그라디언트 배경 → `boxBg`
+  - 흰색 28px 아이콘 → `brandColor` 32px (나머지 5개 카드와 동일 스타일로 통일)
+
+---
+
 ## [4.6.8] 2026-04-06
 
 ### 클릭 히트맵 탭 — "서비스 준비중" 알럿 처리

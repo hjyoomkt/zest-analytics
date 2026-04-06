@@ -9,11 +9,11 @@ export function SidebarLinks(props) {
   let location = useLocation();
   let activeColor = useColorModeValue("gray.700", "white");
   let inactiveColor = useColorModeValue(
-    "secondaryGray.600",
-    "secondaryGray.600"
+    "gray.600",
+    "secondaryGray.400"
   );
   let activeIcon = useColorModeValue("brand.500", "white");
-  let textColor = useColorModeValue("secondaryGray.500", "white");
+  let textColor = useColorModeValue("gray.600", "secondaryGray.400");
   let brandColor = useColorModeValue("brand.500", "brand.400");
 
   const { routes } = props;

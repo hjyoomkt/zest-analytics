@@ -15,6 +15,10 @@ import {
   Flex,
   Text,
   Button,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
   HStack,
   VStack,
   Table,
@@ -44,6 +48,7 @@ import {
   MdLink,
   MdEmail,
   MdSearch,
+  MdKeyboardArrowDown,
 } from 'react-icons/md';
 import { FaFacebook, FaInstagram, FaYoutube, FaTwitter } from 'react-icons/fa';
 import Card from 'components/card/Card';
@@ -54,8 +59,14 @@ const STORAGE_KEY = 'traffic_source_visible_cols';
 
 // ── 모듈 레벨 캐시 ─────────────────────────────────────────────────────────
 const _cache = {};
-const _cacheKey = (advertiserId, startDate, endDate) =>
-  `ref_table|${advertiserId ?? 'all'}|${startDate}|${endDate}`;
+const _cacheKey = (advertiserId, startDate, endDate, attributionModel) =>
+  `ref_table|${advertiserId ?? 'all'}|${startDate}|${endDate}|${attributionModel}`;
+
+const ATTRIBUTION_OPTIONS = [
+  { value: 'first_touch', label: '퍼스트터치' },
+  { value: 'visitor',     label: '방문자'     },
+  { value: 'session',     label: '세션'       },
+];
 
 // ============================================================================
 // 소스 아이콘 설정
@@ -274,6 +285,8 @@ export default function ReferrerTable({
   endDate,
   selectedSources,
   onSourceSelect,
+  attributionModel,
+  onAttributionChange,
 }) {
   const toast = useToast();
   const { isOpen: isColOpen, onOpen: onColOpen, onClose: onColClose } = useDisclosure();
@@ -298,14 +311,16 @@ export default function ReferrerTable({
   const thColor       = useColorModeValue('gray.500', 'gray.400');
   const textColor     = useColorModeValue('secondaryGray.900', 'white');
   // 브랜드 선택 스타일용
-  const brandColor    = useColorModeValue('brand.500', 'brand.400');
-  const selectedBg    = useColorModeValue('brand.50', 'whiteAlpha.100');
-  const inputBg       = useColorModeValue('white', 'navy.700');
-  const bgHover       = useColorModeValue('secondaryGray.100', 'whiteAlpha.100');
-  const popoverBorder = useColorModeValue('gray.200', 'whiteAlpha.100');
+  const brandColor        = useColorModeValue('brand.500', 'brand.400');
+  const selectedBg        = useColorModeValue('brand.50', 'whiteAlpha.100');
+  const inputBg           = useColorModeValue('white', 'navy.700');
+  const bgHover           = useColorModeValue('secondaryGray.100', 'whiteAlpha.100');
+  const popoverBorder     = useColorModeValue('gray.200', 'whiteAlpha.100');
+  const dropdownBorderColor = useColorModeValue('gray.300', 'whiteAlpha.300');
+  const dropdownTextColor   = useColorModeValue('gray.700', 'white');
 
   const fetchData = useCallback(async () => {
-    const key = _cacheKey(advertiserId, startDate, endDate);
+    const key = _cacheKey(advertiserId, startDate, endDate, attributionModel);
     if (!_cache[key]) setLoading(true);
     try {
       const result = await getReferrerBreakdown({
@@ -313,6 +328,7 @@ export default function ReferrerTable({
         availableAdvertiserIds,
         startDate,
         endDate,
+        attributionModel,
       });
       _cache[key] = result;
       setData(result);
@@ -321,16 +337,16 @@ export default function ReferrerTable({
     } finally {
       setLoading(false);
     }
-  }, [advertiserId, availableAdvertiserIds, startDate, endDate]);
+  }, [advertiserId, availableAdvertiserIds, startDate, endDate, attributionModel]);
 
   useEffect(() => {
-    const key = _cacheKey(advertiserId, startDate, endDate);
+    const key = _cacheKey(advertiserId, startDate, endDate, attributionModel);
     if (_cache[key]) {
       setData(_cache[key]);
     } else {
       fetchData();
     }
-  }, [fetchData, advertiserId, startDate, endDate]);
+  }, [fetchData, advertiserId, startDate, endDate, attributionModel]);
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -428,6 +444,47 @@ export default function ReferrerTable({
         </Text>
 
         <Flex gap={2} align="center">
+          {/* 어트리뷰션 기준 선택 */}
+          <Menu>
+            <MenuButton
+              as={Button}
+              rightIcon={<Icon as={MdKeyboardArrowDown} />}
+              bg={inputBg}
+              border="1px solid"
+              borderColor={dropdownBorderColor}
+              color={dropdownTextColor}
+              fontWeight="600"
+              fontSize="xs"
+              _hover={{ bg: bgHover }}
+              _active={{ bg: bgHover }}
+              size="sm"
+              px="10px"
+              borderRadius="8px"
+            >
+              {ATTRIBUTION_OPTIONS.find(o => o.value === attributionModel)?.label}
+            </MenuButton>
+            <MenuList minW="auto" w="fit-content" px="8px" py="8px" zIndex={2000}>
+              {ATTRIBUTION_OPTIONS.map(opt => (
+                <MenuItem
+                  key={opt.value}
+                  onClick={() => onAttributionChange(opt.value)}
+                  bg={attributionModel === opt.value ? brandColor : 'transparent'}
+                  color={attributionModel === opt.value ? 'white' : dropdownTextColor}
+                  _hover={{ bg: attributionModel === opt.value ? brandColor : bgHover }}
+                  fontWeight={attributionModel === opt.value ? '600' : '500'}
+                  fontSize="sm"
+                  px="12px"
+                  py="8px"
+                  borderRadius="8px"
+                  justifyContent="center"
+                  minH="auto"
+                >
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </MenuList>
+          </Menu>
+
           {/* 열 저장 버튼 */}
           <Button
             size="sm"

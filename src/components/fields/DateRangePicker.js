@@ -63,6 +63,7 @@ const DateRangePicker = () => {
 
   const presets = [
     '직접설정',
+    '오늘',
     '어제',
     '최근 7일',
     '최근 14일',
