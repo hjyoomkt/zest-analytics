@@ -5,28 +5,36 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Box, Text, Flex } from '@chakra-ui/react';
+import {
+  Box,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
+  useColorModeValue,
+} from '@chakra-ui/react';
 import { PageHelmet } from 'components/HelmetProvider';
 import { useDateRange } from 'contexts/DateRangeContext';
 import { useAuth } from 'contexts/AuthContext';
 import DateRangePicker from 'components/fields/DateRangePicker';
 import ReferrerChart from './components/ReferrerChart';
 import ReferrerTable from './components/ReferrerTable';
+import KeywordTable from './components/KeywordTable';
 
 export default function TrafficSource() {
   const { currentAdvertiserId, availableAdvertisers } = useAuth();
   const { startDate, endDate } = useDateRange();
 
-  // 선택된 소스(들) - 차트에 표시할 항목
   const [selectedSources, setSelectedSources] = useState(['합계']);
   const [attributionModel, setAttributionModel] = useState('first_touch');
 
   const availableAdvertiserIds = availableAdvertisers.map((a) => a.id);
 
-  /**
-   * 테이블 행 클릭 시 차트 소스 선택
-   * Ctrl/Cmd + Click → 비교 추가, 일반 클릭 → 단독 선택
-   */
+  const tabColor        = useColorModeValue('gray.500', 'gray.400');
+  const tabSelectedColor = useColorModeValue('brand.500', 'brand.300');
+  const tabBorderColor  = useColorModeValue('brand.500', 'brand.300');
+
   const handleSourceSelect = useCallback((source, isMulti) => {
     if (isMulti) {
       setSelectedSources((prev) =>
@@ -51,35 +59,82 @@ export default function TrafficSource() {
       <PageHelmet
         title="유입 경로 분석 | Growth Analytics"
         description="유입 경로별 방문자 수 및 전환 지표 분석"
-        keywords="유입 경로, 레퍼러, 방문자 분석, 전환율"
+        keywords="유입 경로, 레퍼러, 방문자 분석, 전환율, 유입 키워드"
       />
 
       {/* 날짜 선택 */}
       <DateRangePicker />
 
-      {/* 시간대별 방문자 차트 */}
-      <ReferrerChart
-        advertiserId={currentAdvertiserId}
-        availableAdvertiserIds={availableAdvertiserIds}
-        startDate={startDate}
-        endDate={endDate}
-        selectedSources={selectedSources}
-        onRemoveSource={handleRemoveSource}
-      />
+      <Tabs variant="unstyled" mt="20px">
+        <TabList mb="20px" borderBottomWidth="1px" borderColor={useColorModeValue('gray.100', 'whiteAlpha.100')}>
+          <Tab
+            fontSize="sm"
+            fontWeight="600"
+            color={tabColor}
+            pb="12px"
+            px="16px"
+            _selected={{
+              color: tabSelectedColor,
+              borderBottomWidth: '2px',
+              borderColor: tabBorderColor,
+              mb: '-1px',
+            }}
+          >
+            유입 경로
+          </Tab>
+          <Tab
+            fontSize="sm"
+            fontWeight="600"
+            color={tabColor}
+            pb="12px"
+            px="16px"
+            _selected={{
+              color: tabSelectedColor,
+              borderBottomWidth: '2px',
+              borderColor: tabBorderColor,
+              mb: '-1px',
+            }}
+          >
+            유입 키워드
+          </Tab>
+        </TabList>
 
-      {/* 유입 경로 테이블 */}
-      <Box mt="20px">
-        <ReferrerTable
-          advertiserId={currentAdvertiserId}
-          availableAdvertiserIds={availableAdvertiserIds}
-          startDate={startDate}
-          endDate={endDate}
-          selectedSources={selectedSources}
-          onSourceSelect={handleSourceSelect}
-          attributionModel={attributionModel}
-          onAttributionChange={setAttributionModel}
-        />
-      </Box>
+        <TabPanels>
+          {/* ── 유입 경로 탭 ── */}
+          <TabPanel p={0}>
+            <ReferrerChart
+              advertiserId={currentAdvertiserId}
+              availableAdvertiserIds={availableAdvertiserIds}
+              startDate={startDate}
+              endDate={endDate}
+              selectedSources={selectedSources}
+              onRemoveSource={handleRemoveSource}
+            />
+            <Box mt="20px">
+              <ReferrerTable
+                advertiserId={currentAdvertiserId}
+                availableAdvertiserIds={availableAdvertiserIds}
+                startDate={startDate}
+                endDate={endDate}
+                selectedSources={selectedSources}
+                onSourceSelect={handleSourceSelect}
+                attributionModel={attributionModel}
+                onAttributionChange={setAttributionModel}
+              />
+            </Box>
+          </TabPanel>
+
+          {/* ── 유입 키워드 탭 ── */}
+          <TabPanel p={0}>
+            <KeywordTable
+              advertiserId={currentAdvertiserId}
+              availableAdvertiserIds={availableAdvertiserIds}
+              startDate={startDate}
+              endDate={endDate}
+            />
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
     </Box>
   );
 }

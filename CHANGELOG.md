@@ -1,5 +1,36 @@
 # Changelog
 
+## [4.6.11] 2026-04-07
+
+### 유입 키워드 분석 탭 추가 — `/admin/traffic-source`
+
+**`src/views/admin/trafficSource/index.jsx`**
+- 기존 단일 뷰 → **Chakra UI `Tabs`** 구조로 변경
+  - `유입 경로` 탭: 기존 ReferrerChart + ReferrerTable
+  - `유입 키워드` 탭: 신규 KeywordTable
+
+**`src/views/admin/trafficSource/components/KeywordTable.jsx`** (신규)
+- `page_referrer` URL을 파싱하여 자연검색 유입 키워드 추출
+- 지원 검색엔진: 네이버(`query=`), 다음(`q=`), 빙(`q=`), 네이트(`q=`), 야후(`p=`), 구글(`(not provided)`)
+- 세션 단위 전환 귀속: 검색 세션에서 발생한 구매/회원가입/리드 집계
+- 테이블 지표 8개 (기본 on): 방문자수, 세션수, 회원전환수, 회원전환율, 구매자수, 구매량, 총구매금액, 구매전환율
+- 추가 지표 3개 (기본 off): 평균주문금액, 리드, 장바구니담기
+- 열 선택/저장 Popover (localStorage 키: `keyword_table_visible_cols`)
+- 헤더에 검색엔진별 방문자 수 요약 배지
+- `(not provided)` 행에 "Google Search Console 연동 예정" 툴팁 표시
+- 푸터에 연동 예정 안내 문구
+
+**`src/views/admin/zestAnalytics/services/zaService.js`**
+- `getKeywordBreakdown()` 신규 추가
+  - `_extractSearchKeyword()` 내부 헬퍼: referrer URL에서 검색엔진 + 키워드 추출
+  - DB 스키마 변경 없이 기존 `page_referrer` 컬럼 활용
+  - 반환 구조: `{ keyword, engine, engineDomain, visitors, sessions, signups, memberConversionRate, purchasers, purchaseCount, revenue, purchaseConversionRate, avgOrderValue, leads, addToCarts }`
+  - 모듈 레벨 캐시 적용
+
+> **Google 유기검색 키워드**: HTTPS 암호화로 인해 `(not provided)` — 추후 Google Search Console API 연동 예정
+
+---
+
 ## [4.6.10] 2026-04-06
 
 ### DateRangePicker — zest-analytics / traffic-source 페이지 추가

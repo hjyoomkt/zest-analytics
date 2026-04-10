@@ -284,18 +284,25 @@ src/views/
 │   │       ├── columnsData.js / tableData*.json (4개)
 │   │
 │   ├── trafficSource/                   유입 경로 분석 페이지 (/admin/traffic-source)
-│   │   ├── index.jsx                    메인 페이지. 차트↔테이블 선택 소스 상태 공유. Ctrl/Cmd+클릭 다중 비교 선택
+│   │   ├── index.jsx                    메인 페이지. Tabs(유입 경로 / 유입 키워드) 구조. Ctrl/Cmd+클릭 다중 비교 선택
 │   │   └── components/
 │   │       ├── ReferrerChart.jsx        시간대별(0~23시) 유입 소스별 라인 차트 (ApexCharts)
 │   │       │                            - 지표 드롭다운: DateRangePicker 스타일 Menu/MenuItem (8개 지표)
 │   │       │                            - 선택 소스 칩(Tag) 상단 표시, X로 제거
 │   │       │                            - 모듈 레벨 캐시로 탭 전환 시 깜빡임 방지
-│   │       └── ReferrerTable.jsx        유입 소스(referrer 도메인)별 전환 지표 테이블
-│   │                                    - 열 선택: /superadmin/users 브랜드 선택 HStack 커스텀 체크박스 디자인
-│   │                                    - 열 저장: localStorage(traffic_source_visible_cols)
-│   │                                    - 기본 지표 9개 + 추가 지표 5개 (zest-analytics 지표 포함)
-│   │                                    - 합계 행 자동 계산 / 행 클릭 → 차트 소스 선택 연동
-│   │                                    - 정렬, 모듈 레벨 캐시 적용
+│   │       ├── ReferrerTable.jsx        유입 소스(referrer 도메인)별 전환 지표 테이블
+│   │       │                            - 열 선택: /superadmin/users 브랜드 선택 HStack 커스텀 체크박스 디자인
+│   │       │                            - 열 저장: localStorage(traffic_source_visible_cols)
+│   │       │                            - 기본 지표 9개 + 추가 지표 5개 (zest-analytics 지표 포함)
+│   │       │                            - 합계 행 자동 계산 / 행 클릭 → 차트 소스 선택 연동
+│   │       │                            - 정렬, 모듈 레벨 캐시 적용
+│   │       └── KeywordTable.jsx         자연검색 유입 키워드별 전환 지표 테이블
+│   │                                    - page_referrer 파싱으로 키워드 추출 (DB 스키마 변경 없음)
+│   │                                    - 지원: 네이버/다음/빙/네이트/야후. 구글=(not provided)
+│   │                                    - 세션 단위 전환 귀속 (구매/회원가입/리드)
+│   │                                    - 열 선택/저장: localStorage(keyword_table_visible_cols)
+│   │                                    - 헤더 검색엔진별 방문자 수 배지. (not provided) 툴팁 안내
+│   │                                    - 추후 Google Search Console API 연동 예정
 │   │
 │   ├── heatmap/                         UX 스크롤 히트맵 페이지 (독립 페이지, /admin/heatmap)
 │   │   └── index.jsx                    HeatmapViewer를 감싸는 페이지 컴포넌트

@@ -2010,3 +2010,200 @@ export const getReferrerHourlyData = async ({
     throw error;
   }
 };
+
+// ============================================================================
+// 유입 키워드 분석
+// ============================================================================
+
+/**
+ * 검색엔진별 referrer URL에서 키워드를 추출합니다.
+ * - 네이버: search.naver.com?query=
+ * - 다음/카카오: search.daum.net?q=
+ * - 구글: 암호화로 인해 (not provided) 반환
+ * - 빙: bing.com?q=
+ * - 네이트: search.nate.com?q=
+ *
+ * @returns {{ keyword: string, engine: string, engineDomain: string } | null}
+ *   검색 유입이 아니면 null
+ */
+const _extractSearchKeyword = (referrer) => {
+  if (!referrer) return null;
+  try {
+    const url = new URL(referrer.startsWith('http') ? referrer : `https://${referrer}`);
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+
+    // 네이버
+    if (host.includes('naver.com') && host.includes('search')) {
+      const q = url.searchParams.get('query') || url.searchParams.get('q');
+      return { keyword: q || '(not provided)', engine: '네이버', engineDomain: 'naver.com' };
+    }
+    // 다음/카카오
+    if (host.includes('daum.net') || host.includes('search.kakao.com')) {
+      const q = url.searchParams.get('q') || url.searchParams.get('query');
+      return { keyword: q || '(not provided)', engine: '다음', engineDomain: 'daum.net' };
+    }
+    // 구글 — HTTPS 암호화로 키워드 전달 안 됨
+    if (host.includes('google.')) {
+      return { keyword: '(not provided)', engine: 'Google', engineDomain: 'google.com' };
+    }
+    // 빙
+    if (host.includes('bing.com')) {
+      const q = url.searchParams.get('q');
+      return { keyword: q || '(not provided)', engine: 'Bing', engineDomain: 'bing.com' };
+    }
+    // 네이트
+    if (host.includes('nate.com')) {
+      const q = url.searchParams.get('q') || url.searchParams.get('query');
+      return { keyword: q || '(not provided)', engine: '네이트', engineDomain: 'nate.com' };
+    }
+    // 야후
+    if (host.includes('yahoo.')) {
+      const q = url.searchParams.get('p') || url.searchParams.get('q');
+      return { keyword: q || '(not provided)', engine: 'Yahoo', engineDomain: 'yahoo.com' };
+    }
+  } catch {
+    // invalid URL
+  }
+  return null;
+};
+
+/**
+ * 유입 키워드 분석
+ *
+ * za_events의 pageview.page_referrer에서 검색 키워드를 추출하여
+ * 키워드별 방문/전환 지표를 반환합니다.
+ *
+ * @returns {Array<{
+ *   keyword: string,
+ *   engine: string,
+ *   engineDomain: string,
+ *   visitors: number,
+ *   sessions: number,
+ *   signups: number,
+ *   memberConversionRate: number,
+ *   purchasers: number,
+ *   purchaseCount: number,
+ *   revenue: number,
+ *   purchaseConversionRate: number,
+ *   avgOrderValue: number,
+ *   leads: number,
+ *   addToCarts: number,
+ * }>}
+ */
+export const getKeywordBreakdown = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs   = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select(
+        'visitor_id, session_id, event_type, page_referrer, value, created_at'
+      )
+      .in('advertiser_id', ids)
+      .in('event_type', ['pageview', 'purchase', 'signup', 'lead', 'add_to_cart'])
+      .gte('created_at', startTs)
+      .lte('created_at', endTs)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    const rows = data || [];
+
+    // session_id → 키워드 정보 (첫 번째 pageview 기준)
+    const sessionKeywordMap = {};
+    // 키워드 집계 그룹: key = `${engine}||${keyword}`
+    const groups = {};
+
+    const groupKey = (engine, keyword) => `${engine}||${keyword}`;
+    const getOrCreate = (engine, engineDomain, keyword) => {
+      const k = groupKey(engine, keyword);
+      if (!groups[k]) {
+        groups[k] = {
+          keyword,
+          engine,
+          engineDomain,
+          visitors:    new Set(),
+          sessions:    new Set(),
+          signups:     0,
+          purchasers:  new Set(),
+          purchaseCount: 0,
+          revenue:     0,
+          leads:       0,
+          addToCarts:  0,
+        };
+      }
+      return groups[k];
+    };
+
+    // Pass 1: pageview → 키워드 감지 및 session 맵 구성
+    rows
+      .filter((e) => e.event_type === 'pageview')
+      .forEach((event) => {
+        const info = _extractSearchKeyword(event.page_referrer);
+        if (!info) return;
+
+        const g = getOrCreate(info.engine, info.engineDomain, info.keyword);
+        if (event.visitor_id) g.visitors.add(event.visitor_id);
+        if (event.session_id) {
+          g.sessions.add(event.session_id);
+          // 세션의 첫 번째 검색 유입 기록 (이후 전환 귀속용)
+          if (!sessionKeywordMap[event.session_id]) {
+            sessionKeywordMap[event.session_id] = { engine: info.engine, engineDomain: info.engineDomain, keyword: info.keyword };
+          }
+        }
+      });
+
+    // Pass 2: 전환 이벤트 → 세션의 검색 키워드에 귀속
+    rows
+      .filter((e) => ['purchase', 'signup', 'lead', 'add_to_cart'].includes(e.event_type))
+      .forEach((event) => {
+        const info = sessionKeywordMap[event.session_id];
+        if (!info) return;
+        const g = groups[groupKey(info.engine, info.keyword)];
+        if (!g) return;
+
+        if (event.event_type === 'signup')      g.signups++;
+        if (event.event_type === 'lead')        g.leads++;
+        if (event.event_type === 'add_to_cart') g.addToCarts++;
+        if (event.event_type === 'purchase') {
+          g.purchaseCount++;
+          if (event.visitor_id) g.purchasers.add(event.visitor_id);
+          g.revenue += parseFloat(event.value || 0);
+        }
+      });
+
+    return Object.values(groups)
+      .map((g) => {
+        const vc = g.visitors.size;
+        return {
+          keyword:                g.keyword,
+          engine:                 g.engine,
+          engineDomain:           g.engineDomain,
+          visitors:               vc,
+          sessions:               g.sessions.size,
+          signups:                g.signups,
+          memberConversionRate:   vc > 0 ? +((g.signups / vc) * 100).toFixed(2) : 0,
+          purchasers:             g.purchasers.size,
+          purchaseCount:          g.purchaseCount,
+          revenue:                g.revenue,
+          purchaseConversionRate: vc > 0 ? +((g.purchaseCount / vc) * 100).toFixed(2) : 0,
+          avgOrderValue:          g.purchaseCount > 0 ? Math.round(g.revenue / g.purchaseCount) : 0,
+          leads:                  g.leads,
+          addToCarts:             g.addToCarts,
+        };
+      })
+      .sort((a, b) => b.visitors - a.visitors);
+  } catch (error) {
+    console.error('[ZA Service] getKeywordBreakdown error:', error);
+    throw error;
+  }
+};
