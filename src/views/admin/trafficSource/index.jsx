@@ -21,6 +21,7 @@ import DateRangePicker from 'components/fields/DateRangePicker';
 import ReferrerChart from './components/ReferrerChart';
 import ReferrerTable from './components/ReferrerTable';
 import KeywordTable from './components/KeywordTable';
+import NavigationFlow from './components/NavigationFlow';
 
 export default function TrafficSource() {
   const { currentAdvertiserId, availableAdvertisers } = useAuth();
@@ -97,6 +98,21 @@ export default function TrafficSource() {
           >
             유입 키워드
           </Tab>
+          <Tab
+            fontSize="sm"
+            fontWeight="600"
+            color={tabColor}
+            pb="12px"
+            px="16px"
+            _selected={{
+              color: tabSelectedColor,
+              borderBottomWidth: '2px',
+              borderColor: tabBorderColor,
+              mb: '-1px',
+            }}
+          >
+            경로 탐색
+          </Tab>
         </TabList>
 
         <TabPanels>
@@ -127,6 +143,16 @@ export default function TrafficSource() {
           {/* ── 유입 키워드 탭 ── */}
           <TabPanel p={0}>
             <KeywordTable
+              advertiserId={currentAdvertiserId}
+              availableAdvertiserIds={availableAdvertiserIds}
+              startDate={startDate}
+              endDate={endDate}
+            />
+          </TabPanel>
+
+          {/* ── 경로 탐색 탭 ── */}
+          <TabPanel p={0}>
+            <NavigationFlow
               advertiserId={currentAdvertiserId}
               availableAdvertiserIds={availableAdvertiserIds}
               startDate={startDate}

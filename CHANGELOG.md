@@ -1,5 +1,54 @@
 # Changelog
 
+## [4.6.12] 2026-04-14
+
+### 경로 탐색 분석 탭 추가 — `/admin/traffic-source`
+
+**`src/views/admin/trafficSource/index.jsx`**
+- 기존 2탭(유입 경로 / 유입 키워드) → **3탭 구조**로 확장
+  - `경로 탐색` 탭 신규 추가
+
+**`src/views/admin/trafficSource/components/NavigationFlow.jsx`** (신규)
+- 세션 내 페이지 이동 흐름을 단계별 컬럼으로 시각화
+- 표시 모드 3가지 토글 (기본: 타이틀명)
+  - **타이틀명**: `page_title` (없으면 전체 경로 자동 fallback)
+  - **전체 경로**: `/shop/?idx=79` (pathname + query string)
+  - **경로만**: `/shop/` (pathname 기준 그룹화)
+- 카드 클릭 → 해당 페이지로 필터, 다음 단계 데이터 갱신
+- 같은 카드 재클릭 → 필터 해제
+- 선택 경로 breadcrumb 표시 (배지 클릭으로 해당 단계까지 되돌아가기)
+- 단계별 "세션 종료" 카드 (이탈 세션 수/비율)
+- "N개 더 보기" — 단계별 최대 8개 기본 표시, 확장 가능
+- 연속 중복 페이지 자동 제거 (새로고침 무시), 비연속 재방문은 유지
+- 최대 6단계 / 최대 100,000 pageview fetch / 모듈 레벨 캐시 적용
+
+**`src/views/admin/zestAnalytics/services/zaService.js`**
+- `getNavigationPaths()` 신규 추가
+  - `za_events` 테이블에서 `pageview` 이벤트 기반 세션별 경로 배열 반환
+  - 반환 구조: `Array<Array<{ path: string, title: string|null }>>`
+  - `page_title` 컬럼 fetch 포함 (Supabase 컬럼 추가 후 활성화)
+
+---
+
+### SDK — `page_title` 수집 추가
+
+**`src/views/admin/zestAnalytics/sdk/index.js`**
+- `trackPageView()` 페이로드에 `page_title: document.title` 추가
+
+**`za-collect-event.ts`** (Edge Function)
+- `za_events` INSERT 시 `page_title: isPageview ? (payload.page_title || null) : null` 추가
+
+**`public/sdk/za-sdk.js`**
+- `node src/views/admin/zestAnalytics/sdk/build.js` 재빌드 반영 (23.78 KB)
+
+> ⚠️ **Supabase 적용 필요**: `za_events` 테이블에 `page_title TEXT` 컬럼 추가 후 수집 시작
+> ```sql
+> ALTER TABLE za_events ADD COLUMN IF NOT EXISTS page_title TEXT;
+> ```
+> 기존 데이터는 NULL 유지, 신규 수집 데이터부터 타이틀 표시
+
+---
+
 ## [4.6.11] 2026-04-07
 
 ### 유입 키워드 분석 탭 추가 — `/admin/traffic-source`

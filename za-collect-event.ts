@@ -125,6 +125,7 @@ Deno.serve(async (req) => {
       utm_term: isConversion ? payload.utm_term : null,
       utm_content: isConversion ? payload.utm_content : null,
       page_url: payload.page_url || null,
+      page_title: isPageview ? (payload.page_title || null) : null,
       page_referrer: payload.page_referrer || null,
       device_type: payload.device_type || null,
       browser: !isSessionEnd ? payload.browser : null,

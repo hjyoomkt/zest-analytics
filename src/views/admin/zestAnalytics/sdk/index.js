@@ -171,6 +171,7 @@
         tracking_id: this.trackingId,
         event_type: 'pageview',
         page_url: window.location.href,
+        page_title: document.title || null,
         page_referrer: document.referrer || null,
         session_id: this.sessionId,
         visitor_id: this.visitorId,

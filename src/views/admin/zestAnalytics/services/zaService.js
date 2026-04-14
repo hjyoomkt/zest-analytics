@@ -1851,6 +1851,74 @@ export const getReferrerBreakdown = async ({
 };
 
 /**
+ * 경로 탐색 분석 - 세션별 페이지 이동 경로 반환
+ * @param {object} params
+ * @param {string|null} params.advertiserId
+ * @param {string[]} params.availableAdvertiserIds
+ * @param {string} params.startDate - 'YYYY-MM-DD'
+ * @param {string} params.endDate   - 'YYYY-MM-DD'
+ * @returns {Promise<string[][]>} 세션별 페이지 경로 배열 (path+query만, 호스트 제거)
+ */
+export const getNavigationPaths = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const startTs = `${startDate}T00:00:00+09:00`;
+    const endTs   = `${endDate}T23:59:59+09:00`;
+
+    const { data, error } = await supabase
+      .from('za_events')
+      .select('session_id, page_url, page_title, created_at')
+      .in('advertiser_id', ids)
+      .eq('event_type', 'pageview')
+      .gte('created_at', startTs)
+      .lte('created_at', endTs)
+      .order('session_id', { ascending: true })
+      .order('created_at',  { ascending: true })
+      .limit(100000);
+
+    if (error) throw error;
+
+    const extractPath = (raw) => {
+      if (!raw) return '/';
+      try {
+        const u = raw.includes('://') ? new URL(raw) : new URL(`https://x.com${raw}`);
+        const p = u.pathname + (u.search || '');
+        return p || '/';
+      } catch {
+        return raw.length > 300 ? raw.substring(0, 300) : raw;
+      }
+    };
+
+    // session_id 별로 페이지 순서 누적 (created_at 오름차순 이미 정렬됨)
+    // 각 항목: { path: '/shop/?idx=79', title: '상품명' | null }
+    const sessionMap = {};
+    (data || []).forEach((row) => {
+      if (!row.session_id || !row.page_url) return;
+      const path  = extractPath(row.page_url);
+      const title = row.page_title || null;
+      if (!sessionMap[row.session_id]) sessionMap[row.session_id] = [];
+      const arr  = sessionMap[row.session_id];
+      const last = arr[arr.length - 1];
+      // 연속 중복 제거 (같은 path를 여러 번 새로고침한 경우)
+      if (last && last.path === path) return;
+      arr.push({ path, title });
+    });
+
+    return Object.values(sessionMap).filter((p) => p.length > 0);
+  } catch (error) {
+    console.error('[ZA Service] getNavigationPaths error:', error);
+    throw error;
+  }
+};
+
+/**
  * referrer별 시간대별 모든 지표 (차트용, 한 번 조회로 전 지표 반환)
  * @param {object} params
  * @param {string[]} [params.referrers] - 필터할 referrer 배열 (null이면 전체)
