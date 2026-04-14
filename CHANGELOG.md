@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.6.13] 2026-04-14
+
+### 스크롤 히트맵 도달 구간 10% 단위로 세분화
+
+**`src/views/admin/zestAnalytics/services/zaService.js`**
+- `getHeatmapPageStats()` 반환값 변경
+  - 기존: `reach25 / reach50 / reach75 / reach100` (4개 고정 구간)
+  - 변경: `reach10 / reach20 / ... / reach100` (10% 단위, 10개 구간)
+  - 내부 `reachAt(threshold)` 헬퍼 함수로 중복 제거
+  - 빈 데이터 fallback도 동일하게 10개 키로 통일
+
+**`src/views/admin/zestAnalytics/components/HeatmapViewer.jsx`**
+- 우측 "도달 구간" 카드 전면 개편
+  - 기존: 2열 그리드 4개 항목 (25% / 50% / 75% / 100%)
+  - 변경: 세로 목록 10개 항목 (10% / 20% / … / 100%)
+  - 각 항목: 라벨 + 도달 세션 수 + 도달률% + 프로그레스 바
+  - 프로그레스 바 색상: `reachColor()` 연동 (60%↑ 초록 / 30%↑ 주황 / 이하 빨강)
+
+> **SDK 변경 없음**: `public/sdk/za-sdk.js`의 `scrollBuckets`는 이미 10개 배열(10% 단위)로 수집 중
+> **Supabase RPC 변경 없음**: `get_scroll_heatmap`은 기존부터 10개 버킷 반환
+
+---
+
 ## [4.6.12] 2026-04-14
 
 ### 경로 탐색 분석 탭 추가 — `/admin/traffic-source`

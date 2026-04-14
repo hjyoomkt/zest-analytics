@@ -504,24 +504,41 @@ export default function HeatmapViewer({
                   {deviceTab === 'all' ? '전체' : deviceTab.toUpperCase()}
                 </Badge>
               </Flex>
-              <SimpleGrid columns={2} spacing="12px">
-                {[
-                  { label: '25% 이상', pct: pageStats?.reach25, sessions: pageStats ? Math.round((pageStats.reach25 / 100) * pageStats.totalSessions) : 0 },
-                  { label: '50% 이상', pct: pageStats?.reach50, sessions: pageStats ? Math.round((pageStats.reach50 / 100) * pageStats.totalSessions) : 0 },
-                  { label: '75% 이상', pct: pageStats?.reach75, sessions: pageStats ? Math.round((pageStats.reach75 / 100) * pageStats.totalSessions) : 0 },
-                  { label: '100% 이상', pct: pageStats?.reach100, sessions: pageStats ? Math.round((pageStats.reach100 / 100) * pageStats.totalSessions) : 0 },
-                ].map(({ label, pct, sessions }) => (
-                  <Box key={label}>
-                    <Text fontSize="11px" color={subTextColor} mb="2px">{label}</Text>
-                    {loadingData ? <Skeleton h="24px" borderRadius="4px" /> : (
-                      <>
-                        <Text fontSize="20px" fontWeight="700" color={reachColor(pct ?? 0)}>{pct ?? 0}%</Text>
-                        <Text fontSize="11px" color={subTextColor}>{sessions}명</Text>
-                      </>
-                    )}
-                  </Box>
-                ))}
-              </SimpleGrid>
+              <Flex direction="column" gap="6px">
+                {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((threshold) => {
+                  const key = `reach${threshold}`;
+                  const pct = pageStats?.[key] ?? 0;
+                  const sessions = pageStats ? Math.round((pct / 100) * pageStats.totalSessions) : 0;
+                  return (
+                    <Box key={threshold}>
+                      <Flex justify="space-between" align="center" mb="2px">
+                        <Text fontSize="11px" color={subTextColor}>{threshold}% 이상</Text>
+                        {loadingData ? (
+                          <Skeleton h="14px" w="60px" borderRadius="4px" />
+                        ) : (
+                          <Flex align="center" gap="6px">
+                            <Text fontSize="11px" color={subTextColor}>{sessions}명</Text>
+                            <Text fontSize="12px" fontWeight="700" color={reachColor(pct)} w="38px" textAlign="right">{pct}%</Text>
+                          </Flex>
+                        )}
+                      </Flex>
+                      {loadingData ? (
+                        <Skeleton h="4px" borderRadius="full" />
+                      ) : (
+                        <Box bg={bgColor} borderRadius="full" h="4px">
+                          <Box
+                            bg={reachColor(pct)}
+                            borderRadius="full"
+                            h="4px"
+                            w={`${pct}%`}
+                            transition="width 0.3s ease"
+                          />
+                        </Box>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Flex>
             </Box>
 
             <Box bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px">

@@ -697,7 +697,7 @@ export const getHeatmapPageStats = async ({
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     if (ids.length === 0 || !pageUrl) {
-      return { visitors: 0, pageviews: 0, avgScrollDepth: 0, reach25: 0, reach50: 0, reach75: 0, reach100: 0 };
+      return { visitors: 0, pageviews: 0, avgScrollDepth: 0, reach10: 0, reach20: 0, reach30: 0, reach40: 0, reach50: 0, reach60: 0, reach70: 0, reach80: 0, reach90: 0, reach100: 0, totalSessions: 0 };
     }
 
     const startTs = `${startDate}T00:00:00+09:00`;
@@ -741,14 +741,23 @@ export const getHeatmapPageStats = async ({
         : 0;
     const total = seData.length;
 
+    const reachAt = (threshold) =>
+      total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= threshold).length / total) * 100) : 0;
+
     return {
       visitors: uniqueVisitors,
       pageviews: pvData.length,
       avgScrollDepth: avgDepth,
-      reach25: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 25).length / total) * 100) : 0,
-      reach50: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 50).length / total) * 100) : 0,
-      reach75: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 75).length / total) * 100) : 0,
-      reach100: total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= 100).length / total) * 100) : 0,
+      reach10:  reachAt(10),
+      reach20:  reachAt(20),
+      reach30:  reachAt(30),
+      reach40:  reachAt(40),
+      reach50:  reachAt(50),
+      reach60:  reachAt(60),
+      reach70:  reachAt(70),
+      reach80:  reachAt(80),
+      reach90:  reachAt(90),
+      reach100: reachAt(100),
       totalSessions: total,
     };
   } catch (error) {
