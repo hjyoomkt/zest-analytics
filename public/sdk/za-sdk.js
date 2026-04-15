@@ -36,7 +36,7 @@
       };
       this.queue = [];
       this.isInitialized = false;
-      this.sessionId = 'ses_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      this.sessionId = this._getOrCreateSessionId();
       this.visitorId = this._getOrCreateVisitorId();
       this.isNewVisitor = false;
       this.maxScrollDepth = 0;
@@ -433,6 +433,29 @@
     }
 
     /**
+     * 세션 ID 조회 또는 생성 (sessionStorage 기반)
+     * 30분 이내 페이지 이동은 같은 세션으로 유지 (MPA 지원)
+     * @private
+     */
+    _getOrCreateSessionId() {
+      try {
+        const key = 'za_sid';
+        const raw = sessionStorage.getItem(key);
+        if (raw) {
+          const { id, ts } = JSON.parse(raw);
+          // 마지막 활동 후 30분 이내면 세션 유지, 타임스탬프 갱신
+          if (id && Date.now() - ts < 30 * 60 * 1000) {
+            sessionStorage.setItem(key, JSON.stringify({ id, ts: Date.now() }));
+            return id;
+          }
+        }
+      } catch (e) {}
+      const id = 'ses_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      try { sessionStorage.setItem('za_sid', JSON.stringify({ id, ts: Date.now() })); } catch (e) {}
+      return id;
+    }
+
+    /**
      * 영구 방문자 ID 조회 또는 생성 (localStorage 기반)
      * 같은 브라우저라면 페이지 이동/재방문해도 동일 ID 유지
      * @private
@@ -654,7 +677,8 @@
      * @private
      */
     _resetSession() {
-      this.sessionId = 'ses_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      try { sessionStorage.removeItem('za_sid'); } catch (e) {}
+      this.sessionId = this._getOrCreateSessionId();
       this.accumulatedTime = 0;
       this.activeStartTime = null;
       this.maxScrollDepth = 0;

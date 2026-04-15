@@ -12,11 +12,11 @@ export const useDateRange = () => {
 };
 
 export const DateRangeProvider = ({ children }) => {
-  // 기본값: 최근 7일 (종료일 = 어제, KST 기준)
+  // 기본값: 최근 7일 (오늘 포함, KST 기준)
   const getDefaultRange = () => {
     return {
-      start: getKSTDaysAgo(7),
-      end: getKSTYesterday(),
+      start: getKSTDaysAgo(6),
+      end: getKSTToday(),
     };
   };
 
@@ -57,20 +57,20 @@ export const DateRangeProvider = ({ children }) => {
 
       case '최근 7일':
         return {
-          start: getKSTDaysAgo(7),
-          end: getKSTYesterday(),
+          start: getKSTDaysAgo(6),
+          end: getKSTToday(),
         };
 
       case '최근 14일':
         return {
-          start: getKSTDaysAgo(14),
-          end: getKSTYesterday(),
+          start: getKSTDaysAgo(13),
+          end: getKSTToday(),
         };
 
       case '최근 30일':
         return {
-          start: getKSTDaysAgo(30),
-          end: getKSTYesterday(),
+          start: getKSTDaysAgo(29),
+          end: getKSTToday(),
         };
 
       case '이번 주':
@@ -79,7 +79,7 @@ export const DateRangeProvider = ({ children }) => {
         start = new Date(year, month, day + mondayOffset);
         return {
           start: formatDateToYYYYMMDD(start),
-          end: getKSTYesterday(),
+          end: getKSTToday(),
         };
 
       case '지난주':
@@ -97,7 +97,7 @@ export const DateRangeProvider = ({ children }) => {
         start = new Date(year, month, 1);
         return {
           start: formatDateToYYYYMMDD(start),
-          end: getKSTYesterday(),
+          end: getKSTToday(),
         };
 
       case '지난달':
