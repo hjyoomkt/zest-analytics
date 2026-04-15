@@ -11,9 +11,9 @@ import { Helmet } from 'react-helmet-async';
  * />
  */
 export const PageHelmet = ({
-  title = "Growth Analytics | 그로스 애널리틱스",
+  title = "제스트 애널리틱스",
   description = "구글 애널리틱스, 유저 히트맵 등 성장 지표를 한 화면에서 확인하는 분석 대시보드입니다.",
-  keywords = "그로스 애널리틱스, 구글 애널리틱스, 히트맵, 성장 지표, 대시보드",
+  keywords = "제스트 애널리틱스, 구글 애널리틱스, 히트맵, 성장 지표, 대시보드",
   ogTitle,
   ogDescription,
   ogImage = "",

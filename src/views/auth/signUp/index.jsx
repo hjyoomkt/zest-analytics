@@ -35,9 +35,9 @@ function SignUp() {
   return (
     <>
       <PageHelmet
-        title="회원가입 | Growth Analytics"
-        description="Growth Analytics 대시보드에 가입하세요"
-        keywords="회원가입, 그로스 애널리틱스, 대시보드"
+        title="회원가입 | 제스트 애널리틱스"
+        description="제스트 애널리틱스 대시보드에 가입하세요"
+        keywords="회원가입, 제스트 애널리틱스, 대시보드"
       />
       <Flex
         w="100vw"

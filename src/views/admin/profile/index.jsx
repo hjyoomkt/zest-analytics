@@ -11,6 +11,7 @@ import banner from "assets/img/auth/banner.png";
 import avatar from "assets/img/avatars/avatar4.png";
 import React from "react";
 import { useAuth } from "contexts/AuthContext";
+import { PageHelmet } from "components/HelmetProvider";
 
 export default function Overview() {
   const { user, role, userName, availableAdvertisers } = useAuth();
@@ -28,6 +29,11 @@ export default function Overview() {
 
   return (
     <Box pt={{ base: "130px", md: "80px", xl: "80px" }}>
+      <PageHelmet
+        title="프로필 | 제스트 애널리틱스"
+        description="계정 정보 및 브랜드 관리"
+        keywords="프로필, 계정 설정, 브랜드 관리, 제스트 애널리틱스"
+      />
       <Grid
         templateColumns={{ base: "1fr", lg: "1.34fr 1fr 1.62fr" }}
         templateRows={{ base: "repeat(3, 1fr)", lg: "1fr" }}

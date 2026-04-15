@@ -22,7 +22,7 @@ export default function ZestAnalytics() {
   return (
     <Box pt={{ base: '130px', md: '80px', xl: '80px' }}>
       <PageHelmet
-        title="Zest Analytics | Growth Analytics"
+        title="이벤트 분석 | 제스트 애널리틱스"
         description="웹사이트 전환 이벤트 추적 및 분석"
         keywords="전환 추적, 이벤트 분석, UTM 파라미터, 어트리뷰션"
       />

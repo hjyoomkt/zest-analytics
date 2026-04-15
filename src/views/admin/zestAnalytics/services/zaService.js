@@ -15,6 +15,38 @@
 import { supabase } from 'config/supabase';
 
 // ============================================================================
+// URL 정규화
+// ============================================================================
+
+const TRACKING_PARAMS = new Set([
+  'gclid', 'gclsrc', 'gbraid', 'wbraid', 'dclid',
+  'gtm_latency', 'gtm_debug',
+  'fbclid',
+  'msclkid',
+  'ttclid', 'twclid', 'li_fat_id', 'igshid',
+  'za_source', 'za_medium', 'za_campaign', 'za_term', 'za_content',
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id',
+]);
+
+/**
+ * 트래킹 파라미터를 제거한 정규화 URL 반환
+ * localhost / 127.0.0.1 URL이면 null 반환 (집계에서 제외)
+ */
+const normalizeUrl = (raw) => {
+  if (!raw) return '/';
+  try {
+    const u = new URL(raw.includes('://') ? raw : `https://x.com${raw}`);
+    const h = u.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return null;
+    TRACKING_PARAMS.forEach((p) => u.searchParams.delete(p));
+    const qs = u.searchParams.toString();
+    return u.pathname + (qs ? `?${qs}` : '');
+  } catch {
+    return raw.length > 300 ? raw.substring(0, 300) : raw;
+  }
+};
+
+// ============================================================================
 // 추적 코드 관리
 // ============================================================================
 
@@ -1175,7 +1207,8 @@ export const getTopPages = async ({
 
     const byPage = {};
     (data || []).forEach(row => {
-      const url = row.page_url || '/';
+      const url = normalizeUrl(row.page_url);
+      if (!url) return;
       if (!byPage[url]) byPage[url] = { page_url: url, pageviews: 0, visitors: new Set() };
       byPage[url].pageviews += 1;
       if (row.visitor_id) byPage[url].visitors.add(row.visitor_id);
@@ -1271,7 +1304,8 @@ export const getTopActions = async ({
     const byKey = {};
     (data || []).forEach(row => {
       const etype = row.event_type || 'pageview';
-      const url = row.page_url || '/';
+      const url = normalizeUrl(row.page_url);
+      if (!url) return;
       const displayUrl = decodeUrl(url);
       let label = '';
       if (etype === 'pageview') label = `${displayUrl} 방문`;
@@ -1894,16 +1928,7 @@ export const getNavigationPaths = async ({
 
     if (error) throw error;
 
-    const extractPath = (raw) => {
-      if (!raw) return '/';
-      try {
-        const u = raw.includes('://') ? new URL(raw) : new URL(`https://x.com${raw}`);
-        const p = u.pathname + (u.search || '');
-        return p || '/';
-      } catch {
-        return raw.length > 300 ? raw.substring(0, 300) : raw;
-      }
-    };
+    const extractPath = (raw) => normalizeUrl(raw);
 
     // session_id 별로 페이지 순서 누적 (created_at 오름차순 이미 정렬됨)
     // 각 항목: { path: '/shop/?idx=79', title: '상품명' | null }
@@ -1911,6 +1936,7 @@ export const getNavigationPaths = async ({
     (data || []).forEach((row) => {
       if (!row.session_id || !row.page_url) return;
       const path  = extractPath(row.page_url);
+      if (!path) return;
       const title = row.page_title || null;
       if (!sessionMap[row.session_id]) sessionMap[row.session_id] = [];
       const arr  = sessionMap[row.session_id];

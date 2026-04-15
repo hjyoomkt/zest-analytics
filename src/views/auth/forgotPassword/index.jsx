@@ -17,6 +17,7 @@ import {
 } from "@chakra-ui/react";
 import illustration from "assets/img/auth/lemon.jpg";
 import { supabase } from "config/supabase";
+import { PageHelmet } from "components/HelmetProvider";
 
 function ForgotPassword() {
   const textColor = useColorModeValue("navy.700", "white");
@@ -70,6 +71,12 @@ function ForgotPassword() {
   };
 
   return (
+    <>
+      <PageHelmet
+        title="비밀번호 찾기 | 제스트 애널리틱스"
+        description="비밀번호 재설정 이메일을 받으세요"
+        keywords="비밀번호 찾기, 계정 복구, 제스트 애널리틱스"
+      />
     <Flex
       w="100vw"
       h="100vh"
@@ -263,6 +270,7 @@ function ForgotPassword() {
         />
       </Box>
     </Flex>
+    </>
   );
 }
 

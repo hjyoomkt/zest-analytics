@@ -58,7 +58,7 @@ export default function TrafficSource() {
   return (
     <Box pt={{ base: '130px', md: '80px', xl: '80px' }}>
       <PageHelmet
-        title="유입 경로 분석 | Growth Analytics"
+        title="유입 경로 분석 | 제스트 애널리틱스"
         description="유입 경로별 방문자 수 및 전환 지표 분석"
         keywords="유입 경로, 레퍼러, 방문자 분석, 전환율, 유입 키워드"
       />

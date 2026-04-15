@@ -63,6 +63,19 @@
         return;
       }
 
+      // localhost / 127.0.0.1 환경에서는 수집 비활성화
+      const hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+        console.log('[ZA] Localhost detected — tracking disabled.');
+        return;
+      }
+
+      // 히트맵 뷰어 iframe 미리보기 시 수집 비활성화
+      if (new URLSearchParams(window.location.search).get('za_preview') === '1') {
+        console.log('[ZA] Preview mode detected — tracking disabled.');
+        return;
+      }
+
       this.trackingId = trackingId;
       this.config = { ...this.config, ...options };
       this.isInitialized = true;

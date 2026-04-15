@@ -256,7 +256,16 @@ export default function HeatmapViewer({
     ? heatmapData.map((d) => d.reach_pct)
     : Array(10).fill(0);
 
-  const iframeUrl = selectedPage || 'about:blank';
+  const iframeUrl = (() => {
+    if (!selectedPage) return 'about:blank';
+    try {
+      const u = new URL(selectedPage);
+      u.searchParams.set('za_preview', '1');
+      return u.toString();
+    } catch {
+      return selectedPage;
+    }
+  })();
 
   return (
     <Box>

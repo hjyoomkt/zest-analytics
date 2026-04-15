@@ -11,7 +11,7 @@ export default function Heatmap() {
   return (
     <Box pt={{ base: '130px', md: '80px', xl: '80px' }}>
       <PageHelmet
-        title="UX 히트맵 | Growth Analytics"
+        title="UX 히트맵 | 제스트 애널리틱스"
         description="스크롤 도달률 기반 UX 히트맵"
         keywords="히트맵, 스크롤 분석, UX, 도달률"
       />

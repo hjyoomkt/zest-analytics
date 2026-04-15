@@ -333,7 +333,7 @@ src/views/
 │       │                                - 우측 통계: 방문자/페이지뷰/평균 도달률/세션 수 + 도달 구간 + SVG 추이 차트
 │       │                                - iframe 페이지 이동 감지: SDK postMessage(za_pageview) 수신
 │       ├── services/
-│       │   └── zaService.js             Supabase API 호출 (za_tracking_codes, za_events)
+│       │   └── zaService.js             Supabase API 호출 (za_tracking_codes, za_events) + normalizeUrl() URL 정규화 헬퍼
 │       │                                ── 추적 코드 관리 ──
 │       │                                - getTrackingCodes / createTrackingCode / regenerateTrackingCode
 │       │                                - updateTrackingCodeStatus / deleteTrackingCode
@@ -559,7 +559,7 @@ src/assets/
 | `src/contexts/DateRangeContext.js` | 날짜 범위 전역 상태 (useDateRange 훅) |
 | `src/views/admin/zestAnalytics/ZestAnalytics.jsx` | 메인 페이지 (KPI 카드 + ChannelAnalytics 단일 뷰) |
 | `src/views/admin/zestAnalytics/index.js` | 모듈 진입점 |
-| `src/views/admin/zestAnalytics/services/zaService.js` | Supabase API 서비스 |
+| `src/views/admin/zestAnalytics/services/zaService.js` | Supabase API 서비스. 파일 상단 `normalizeUrl()` 헬퍼로 트래킹 파라미터(gclid, fbclid, utm_* 등) 제거 후 URL 집계 |
 | `src/views/admin/zestAnalytics/components/EventStatistics.jsx` | KPI 카드 |
 | `src/views/admin/zestAnalytics/components/ChannelAnalytics.jsx` | GA 스타일 채널·소스·미디엄·캠페인 분석 테이블 (열 선택, 정렬, 캐시) |
 | `src/views/admin/zestAnalytics/components/HeatmapViewer.jsx` | 스크롤/클릭 히트맵 뷰어. 탭 토글(스크롤·클릭), 클릭 히트맵 UI 완성. **클릭 수집 비활성화** (SDK 주석 처리) |

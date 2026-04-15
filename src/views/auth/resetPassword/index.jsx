@@ -23,6 +23,7 @@ import illustration from "assets/img/auth/lemon.jpg";
 import { MdOutlineRemoveRedEye } from "react-icons/md";
 import { RiEyeCloseLine } from "react-icons/ri";
 import { supabase } from "config/supabase";
+import { PageHelmet } from "components/HelmetProvider";
 
 function ResetPassword() {
   const navigate = useNavigate();
@@ -189,6 +190,12 @@ function ResetPassword() {
   }
 
   return (
+    <>
+      <PageHelmet
+        title="비밀번호 재설정 | 제스트 애널리틱스"
+        description="새 비밀번호를 설정하세요"
+        keywords="비밀번호 재설정, 계정 복구, 제스트 애널리틱스"
+      />
     <Flex w="100vw" h="100vh" bg={bgColor} overflow="hidden">
       {/* 왼쪽: 비밀번호 재설정 폼 */}
       <Flex
@@ -382,6 +389,7 @@ function ResetPassword() {
         />
       </Box>
     </Flex>
+    </>
   );
 }
 

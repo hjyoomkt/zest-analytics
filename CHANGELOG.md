@@ -1,5 +1,94 @@
 # Changelog
 
+## [4.6.15] 2026-04-15
+
+### localhost 및 히트맵 미리보기 트래픽 필터링
+
+- **SDK (`sdk/index.js`)** — `init()` 진입 시 두 가지 조건으로 수집 차단:
+  1. `hostname`이 `localhost` / `127.0.0.1` / `::1` → 개발 환경 차단
+  2. URL에 `?za_preview=1` 파라미터 존재 → 히트맵 뷰어 iframe 미리보기 차단
+- **HeatmapViewer.jsx**: `iframeUrl` 생성 시 `?za_preview=1` 자동 추가
+- **zaService.js**: `normalizeUrl()`에 localhost 감지 추가 — localhost URL은 `null` 반환
+  - `getTopPages`, `getTopActions`, `getNavigationPaths` 세 함수에서 `null` 행 스킵
+  - 이미 DB에 쌓인 localhost 데이터도 조회 시 자동 제외
+
+### URL 정규화 — 트래킹 파라미터 필터링 (`zaService.js`)
+
+**문제**
+- `?gtm_latency=1`, `?gclid=xxx`, `?fbclid=xxx` 등 광고·GTM 트래킹 파라미터가 URL에 포함된 채로 집계되어 같은 페이지가 여러 행으로 분리됨
+- 예: `https://zestmkt.co.kr/` 10건 + `/?gtm_latency=1` 7건 + `/?gclid=xxx` 1건 → 실제로 동일 페이지
+
+**수정 — `zaService.js`**
+
+- 파일 상단에 `TRACKING_PARAMS` Set과 `normalizeUrl()` 헬퍼 추가
+  - 제거 대상: `gclid`, `gclsrc`, `gbraid`, `wbraid`, `dclid`, `gtm_latency`, `gtm_debug`, `fbclid`, `msclkid`, `ttclid`, `twclid`, `li_fat_id`, `igshid`, `za_*`, `utm_*`
+  - 비즈니스 파라미터(`?idx=10`, `?id=5` 등)는 유지
+- 적용 함수 3곳:
+  - `getTopPages()` — 많이 방문한 페이지 집계 키
+  - `getTopActions()` — 자주 하는 행동 집계 키
+  - `getNavigationPaths()` — 경로 탐색 노드 (`extractPath` → `normalizeUrl` 위임)
+
+**영향 없는 기능**
+- 유입경로 분석 (`page_referrer` 컬럼 사용)
+- 어트리뷰션·캠페인 분석 (`utm_*` 별도 컬럼 사용)
+- DB 저장 데이터 — 원본 URL은 그대로 보존, 조회·집계 시에만 정규화
+
+---
+
+## [4.6.14] 2026-04-15
+
+### 버그 수정 — 슈퍼어드민 사용자 목록 미표시 (Supabase RLS)
+
+**현상**
+- `/superadmin/users` 페이지에서 master 계정으로 접근 시 전체 사용자 목록이 조회되지 않음
+- `agency_admin`, `agency_manager`, `agency_staff` 등 `advertiser_id = NULL`인 사용자들이 노출되지 않음
+
+**원인**
+- `users` 테이블의 SELECT RLS 정책(`users_select_accessible_users`)이 아래 조건으로만 설정되어 있었음
+  ```sql
+  (advertiser_id IN (SELECT get_user_advertiser_ids_by_uid(auth.uid())))
+  OR (id = auth.uid())
+  ```
+- `advertiser_id = NULL`인 사용자는 두 조건 모두 해당하지 않아 DB 레벨에서 필터링됨
+- 앱 코드(`getUsers`)는 master 역할 시 필터를 건너뛰도록 올바르게 구현되어 있었으나, Supabase `anon key` 사용 시 RLS가 앱 코드보다 우선 적용됨
+
+**수정 — Supabase SQL**
+
+1. 재귀 방지용 헬퍼 함수 추가 (`SECURITY DEFINER`로 RLS 우회):
+   ```sql
+   CREATE OR REPLACE FUNCTION get_current_user_role()
+   RETURNS TEXT
+   LANGUAGE SQL
+   SECURITY DEFINER
+   STABLE
+   AS $$
+     SELECT role FROM public.users
+     WHERE id = auth.uid() AND deleted_at IS NULL;
+   $$;
+   ```
+
+2. SELECT 정책 교체:
+   ```sql
+   DROP POLICY "users_select_accessible_users" ON users;
+
+   CREATE POLICY "users_select_accessible_users"
+   ON users
+   FOR SELECT
+   TO authenticated
+   USING (
+     get_current_user_role() = 'master'
+     OR (advertiser_id IN (SELECT get_user_advertiser_ids_by_uid(auth.uid())))
+     OR (id = auth.uid())
+   );
+   ```
+
+**영향 범위**
+- `src/services/supabaseService.js` — 코드 변경 없음 (기존 로직 정상)
+- `src/views/admin/users/components/UserTable.js` — 코드 변경 없음
+- Supabase `users` 테이블 RLS 정책만 변경
+
+---
+
 ## [4.6.13] 2026-04-14
 
 ### 스크롤 히트맵 도달 구간 10% 단위로 세분화

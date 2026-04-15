@@ -36,6 +36,7 @@ import {
   MdPersonAdd,
   MdRepeat,
 } from 'react-icons/md';
+import { PageHelmet } from 'components/HelmetProvider';
 import MiniStatistics from 'components/card/MiniStatistics';
 import IconBox from 'components/icons/IconBox';
 import DateRangePicker from 'components/fields/DateRangePicker';
@@ -99,6 +100,11 @@ export default function MainDashboard() {
 
   return (
     <Box pt={{ base: '130px', md: '80px', xl: '80px' }}>
+      <PageHelmet
+        title="대시보드 | 제스트 애널리틱스"
+        description="방문자 수, 페이지뷰, 체류 시간 등 핵심 웹사이트 지표를 한눈에 확인하세요"
+        keywords="대시보드, 방문자 분석, 페이지뷰, 체류 시간, 제스트 애널리틱스"
+      />
       {/* 날짜 선택 */}
       <DateRangePicker />
 
