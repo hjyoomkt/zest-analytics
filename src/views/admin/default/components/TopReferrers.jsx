@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { useStableFetch } from 'hooks/useStableFetch';
 import {
   Box, Flex, Text, Skeleton, useColorModeValue,
-  Button, Menu, MenuButton, MenuList, MenuItem, Icon,
+  Button, Menu, MenuButton, MenuList, MenuItem, Icon, Tooltip,
 } from '@chakra-ui/react';
-import { MdKeyboardArrowDown } from 'react-icons/md';
+import { MdKeyboardArrowDown, MdOutlineInfo } from 'react-icons/md';
 import ReactApexChart from 'react-apexcharts';
 import Card from 'components/card/Card';
 import { useAuth } from 'contexts/AuthContext';
@@ -93,7 +93,33 @@ export default function TopReferrers() {
         <Text color={textColor} fontSize='md' fontWeight='700'>
           유입경로 Top5
         </Text>
-        <Menu>
+        <Flex align='center' gap='6px'>
+          <Tooltip
+            label={
+              <Box fontSize='xs' lineHeight='1.7'>
+                <Text fontWeight='700' mb='6px'>어트리뷰션 기준 안내</Text>
+                <Text fontWeight='600'>퍼스트터치</Text>
+                <Text mb='6px' color='whiteAlpha.800'>방문자가 처음 유입된 경로 하나에만 카운트됩니다. 중복 없이 실제 UV와 가장 가깝습니다.</Text>
+                <Text fontWeight='600'>방문자</Text>
+                <Text mb='6px' color='whiteAlpha.800'>방문할 때마다 해당 경로에 카운트됩니다. 한 사람이 여러 경로로 방문하면 각 경로에 모두 집계되어 합계가 실제 UV보다 크게 나올 수 있습니다.</Text>
+                <Text fontWeight='600'>세션</Text>
+                <Text color='whiteAlpha.800'>세션 수 기준으로 집계합니다. 한 사람이 N번 방문하면 N개의 세션으로 카운트됩니다.</Text>
+              </Box>
+            }
+            placement='bottom-end'
+            hasArrow
+            maxW='300px'
+            bg='gray.700'
+            color='white'
+            borderRadius='lg'
+            p='12px'
+            openDelay={100}
+          >
+            <Flex align='center' cursor='default'>
+              <Icon as={MdOutlineInfo} boxSize='16px' color={dropdownTextColor} opacity={0.5} />
+            </Flex>
+          </Tooltip>
+          <Menu>
           <MenuButton
             as={Button}
             rightIcon={<Icon as={MdKeyboardArrowDown} />}
@@ -132,6 +158,7 @@ export default function TopReferrers() {
             ))}
           </MenuList>
         </Menu>
+        </Flex>
       </Flex>
       {loading ? (
         <Skeleton h='200px' borderRadius='12px' />

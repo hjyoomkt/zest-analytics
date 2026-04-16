@@ -240,6 +240,7 @@ src/views/
 │   │   │   │                            getTopActions() 사용, event_type 배지 매핑
 │   │   │   ├── TopReferrers.jsx         유입경로 Top5 도넛 차트 + 목록 (비율 % + 건수)
 │   │   │   │                            getTopReferrers() 사용, channel 우선 → page_referrer 파싱
+│   │   │   │                            어트리뷰션 모델 드롭다운 (퍼스트터치/방문자/세션) + ⓘ 아이콘 툴팁
 │   │   │   └── OsBrowserStats.jsx       OS / 브라우저별 통계 (프로그레스바)
 │   │   │                                getOsStats() + getBrowserStats() 병렬 호출
 │   │   │                                항목별 이벤트 수 + 사용자 수(visitor_id 중복 제거) 동시 표시
@@ -296,6 +297,7 @@ src/views/
 │   │       │                            - 기본 지표 9개 + 추가 지표 5개 (zest-analytics 지표 포함)
 │   │       │                            - 합계 행 자동 계산 / 행 클릭 → 차트 소스 선택 연동
 │   │       │                            - 정렬, 모듈 레벨 캐시 적용
+│   │       │                            - 어트리뷰션 모델 드롭다운 옆 ⓘ 아이콘 호버 시 3가지 모델 설명 툴팁 표시
 │   │       ├── KeywordTable.jsx         자연검색 유입 키워드별 전환 지표 테이블
 │   │       │                            - page_referrer 파싱으로 키워드 추출 (DB 스키마 변경 없음)
 │   │       │                            - 지원: 네이버/다음/빙/네이트/야후. 구글=(not provided)

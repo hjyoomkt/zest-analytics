@@ -5,7 +5,8 @@
  * - 세션 내 페이지 이동 흐름을 단계별 컬럼으로 시각화
  * - 카드 클릭 → 해당 페이지 필터 → 다음 단계 데이터 갱신
  * - 표시 모드: 타이틀명 | 전체경로(/shop/?idx=79) | 경로만(/shop/)
- * - 최대 6단계 / 단계별 최대 8개 카드(더 보기 가능)
+ * - 기본 7단계 표시 / 데이터 있으면 1단계씩 확장 가능 (최대 20단계)
+ * - 단계별 최대 8개 카드(더 보기 가능) / 가로 스크롤 지원
  * ============================================================================
  */
 
@@ -27,15 +28,17 @@ import {
   MdArrowForward,
   MdClose,
   MdExitToApp,
+  MdKeyboardArrowRight,
 } from 'react-icons/md';
 import Card from 'components/card/Card';
 import { getNavigationPaths } from 'views/admin/zestAnalytics/services/zaService';
 
 // ── 설정 ─────────────────────────────────────────────────────────────────────
 
-const MAX_STEPS     = 6;
-const PAGE_LIMIT    = 8;
-const SESSION_LIMIT = 100000;
+const INITIAL_STEPS   = 7;       // 기본 표시 단계 수 (이후 1씩 확장 가능)
+const ABSOLUTE_MAX    = 20;      // 전체 계산 상한
+const PAGE_LIMIT      = 8;
+const SESSION_LIMIT   = 100000;
 
 // ── 라벨 추출 ─────────────────────────────────────────────────────────────────
 
@@ -228,12 +231,13 @@ function ExitCard({ count, totalInStep }) {
   );
 }
 
-function StepColumn({ step, selectedLabel, onPageClick }) {
+function StepColumn({ step, selectedLabel, onPageClick, onExpand }) {
   const [expanded, setExpanded] = useState(false);
   useEffect(() => { setExpanded(false); }, [step.pages]);
 
-  const thColor   = useColorModeValue('gray.500', 'gray.400');
-  const dividerBg = useColorModeValue('gray.100', 'whiteAlpha.100');
+  const thColor    = useColorModeValue('gray.500', 'gray.400');
+  const dividerBg  = useColorModeValue('gray.100', 'whiteAlpha.100');
+  const brandColor = useColorModeValue('brand.500', 'brand.400');
 
   const maxCount  = step.pages[0]?.count ?? 1;
   const displayed = expanded ? step.pages : step.pages.slice(0, PAGE_LIMIT);
@@ -243,9 +247,12 @@ function StepColumn({ step, selectedLabel, onPageClick }) {
   return (
     <Flex direction="column" flexShrink={0} w="210px">
       <Box mb="10px" textAlign="center">
-        <Text fontSize="11px" fontWeight="700" color={thColor} textTransform="uppercase" letterSpacing="0.06em">
-          {stepLabel}
-        </Text>
+        <Flex justify="center" align="center" gap="3px">
+          <Text fontSize="11px" fontWeight="700" color={thColor} textTransform="uppercase" letterSpacing="0.06em">
+            {stepLabel}
+          </Text>
+          {onExpand && <Icon as={MdKeyboardArrowRight} boxSize="13px" color={brandColor} />}
+        </Flex>
         <Text fontSize="11px" color={thColor} mt="2px">
           {step.relevant.toLocaleString()}세션
         </Text>
@@ -261,7 +268,7 @@ function StepColumn({ step, selectedLabel, onPageClick }) {
             maxCount={maxCount}
             totalInStep={step.reachCount}
             isSelected={selectedLabel === lbl}
-            onClick={() => onPageClick(step.stepIdx, lbl)}
+            onClick={() => { onPageClick(step.stepIdx, lbl); if (onExpand) onExpand(); }}
           />
         ))}
 
@@ -300,10 +307,11 @@ export default function NavigationFlow({
   startDate,
   endDate,
 }) {
-  const [sessions,     setSessions]     = useState([]);
-  const [loading,      setLoading]      = useState(false);
-  const [pathMode,     setPathMode]     = useState('title');
-  const [selectedPath, setSelectedPath] = useState([]);
+  const [sessions,      setSessions]     = useState([]);
+  const [loading,       setLoading]      = useState(false);
+  const [pathMode,      setPathMode]     = useState('title');
+  const [selectedPath,  setSelectedPath] = useState([]);
+  const [visibleSteps,  setVisibleSteps] = useState(INITIAL_STEPS);
 
   const textColor     = useColorModeValue('secondaryGray.900', 'white');
   const subColor      = useColorModeValue('gray.500', 'gray.400');
@@ -332,13 +340,16 @@ export default function NavigationFlow({
     }
   }, [advertiserId, ids, startDate, endDate]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { setSelectedPath([]); }, [pathMode]);
+  useEffect(() => { fetchData(); setVisibleSteps(INITIAL_STEPS); }, [fetchData]);
+  useEffect(() => { setSelectedPath([]); setVisibleSteps(INITIAL_STEPS); }, [pathMode]);
 
-  const stepData = useMemo(
-    () => computeStepData(sessions, selectedPath, pathMode, MAX_STEPS),
+  // ABSOLUTE_MAX까지 전체 계산 후 visibleSteps만큼 잘라서 표시
+  const allStepData = useMemo(
+    () => computeStepData(sessions, selectedPath, pathMode, ABSOLUTE_MAX),
     [sessions, selectedPath, pathMode],
   );
+  const stepData   = allStepData.slice(0, visibleSteps);
+  const hasMore    = allStepData.length > visibleSteps;
 
   const handlePageClick = useCallback((stepIdx, lbl) => {
     setSelectedPath((prev) => {
@@ -490,22 +501,46 @@ export default function NavigationFlow({
             <Text color="gray.300" fontSize="sm">선택한 기간에 추적된 세션이 없습니다</Text>
           </Flex>
         ) : (
-          <Box overflowX="auto" pb={2}>
+          <Box overflowX={visibleSteps > INITIAL_STEPS ? 'auto' : 'hidden'} pb={2}>
             <Flex gap={0} align="flex-start" minW="fit-content">
-              {stepData.map((step, idx) => (
-                <React.Fragment key={step.stepIdx}>
-                  {idx > 0 && (
-                    <Flex align="flex-start" pt="38px" px="6px" flexShrink={0}>
-                      <Icon as={MdArrowForward} boxSize="18px" color={arrowColor} />
-                    </Flex>
-                  )}
-                  <StepColumn
-                    step={step}
-                    selectedLabel={selectedPath[step.stepIdx] ?? null}
-                    onPageClick={handlePageClick}
-                  />
-                </React.Fragment>
-              ))}
+              {stepData.map((step, idx) => {
+                const isLast   = idx === stepData.length - 1;
+                const canExpand = isLast && hasMore;
+                return (
+                  <React.Fragment key={step.stepIdx}>
+                    {idx > 0 && (
+                      <Flex align="flex-start" pt="38px" px="6px" flexShrink={0}>
+                        <Icon as={MdArrowForward} boxSize="18px" color={arrowColor} />
+                      </Flex>
+                    )}
+                    <StepColumn
+                      step={step}
+                      selectedLabel={selectedPath[step.stepIdx] ?? null}
+                      onPageClick={handlePageClick}
+                      onExpand={canExpand ? () => setVisibleSteps((v) => v + 1) : undefined}
+                    />
+                  </React.Fragment>
+                );
+              })}
+
+              {/* ── 접기 버튼 (확장 상태일 때만) ── */}
+              {visibleSteps > INITIAL_STEPS && (
+                <Flex align="flex-start" pt="34px" pl="8px" flexShrink={0}>
+                  <Tooltip label={`${INITIAL_STEPS}단계로 접기`} placement="top" hasArrow>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      colorScheme="gray"
+                      fontSize="10px"
+                      color={subColor}
+                      px="6px"
+                      onClick={() => setVisibleSteps(INITIAL_STEPS)}
+                    >
+                      접기
+                    </Button>
+                  </Tooltip>
+                </Flex>
+              )}
             </Flex>
           </Box>
         )}
