@@ -341,19 +341,20 @@ src/views/
 │       │                                - iframe 실제 페이지 미리보기 + 우측 56px 수직 컬러 바
 │       │                                - 우측 통계: 방문자/페이지뷰/평균 도달률/세션 수 + 도달 구간 + SVG 추이 차트
 │       │                                - iframe 페이지 이동 감지: SDK postMessage(za_pageview) 수신
+│       │                                - 컴포넌트 분리: ScrollHeatmapPanel / ScrollStatsPanel / FilterChip
 │       │                                ── 탭 3종 ──
 │       │                                - 스크롤 히트맵: 정규화 URL 기준 전체 채널 합산
-│       │                                - 스크롤 히트맵(채널분리): raw_urls에서 UTM 파싱 → 채널 카드 선택 → 단일 URL 조회
-│       │                                  ⚠️ 재설계 필요: URL UTM 파싱 방식은 랜딩 페이지에만 적용됨
-│       │                                  → za_events.utm_source/medium 컬럼 기준 필터로 교체해야 함
+│       │                                - 채널별 히트맵: 3단계 드릴다운 (채널 필터 → 페이지 목록 → 히트맵)
+│       │                                  · Step 1 필터 패널: source → medium → campaign 계단식 (각 선택 시 하위 행 노출)
+│       │                                  · Step 2 페이지 목록: maxH 320px 스크롤, 세션/도달률 헤더 클릭 정렬(▼▲⇅)
+│       │                                  · Step 3 히트맵: 필터된 raw_urls 기준 조회 (ScrollHeatmapPanel 재사용)
+│       │                                  ⚠️ 데이터 한계: raw_url UTM 파싱 방식 → 랜딩 페이지에만 적용
+│       │                                  → 향후 za_events.utm_source/medium 컬럼 기준 DB 필터로 교체 필요
 │       │                                - 클릭 히트맵: UI 구현 완료, 수집 비활성화(준비중 표시)
 │       │                                ── URL 정규화 ──
 │       │                                - 페이지 드롭다운: UTM·광고 파라미터 제거 후 그룹핑, "URL 변형 N개" 표시
 │       │                                - iframe URL: raw_urls[0] 사용 (hostname 유지)
 │       │                                - selectedRawUrls useMemo: 정규화 URL → 원본 URL 배열 역조회
-│       │                                ── 목업 데이터 ──
-│       │                                - MOCK_PAGE / MOCK_HEATMAP / MOCK_STATS 상수로 5개 채널 목업 주입
-│       │                                - 드롭다운에 "[데모] /shop/spring-sale" 항목으로 표시
 │       ├── services/
 │       │   └── zaService.js             Supabase API 호출 (za_tracking_codes, za_events) + normalizeUrl() URL 정규화 헬퍼
 │       │                                ── 추적 코드 관리 ──
@@ -529,6 +530,7 @@ src/assets/
 | 2026-04-05 | `/admin/default` 메인 대시보드 전면 구현 — 6 KPI 카드, 7개 차트/테이블 컴포넌트, DateRangePicker, useStableFetch 훅 | `CHANGELOG.md` v4.6.0 |
 | 2026-04-05 | za_events 실제 스키마 확인 — page_referrer(not referrer), channel, is_new_visitor, scroll_depth, visitor_id, session_id, time_on_page 존재 확인; element_text 부재 확인 | `수퍼베이스_DB_세팅.md` Part 10 |
 | 2026-04-05 | OS/브라우저 통계 추가 — OsBrowserStats.jsx, getOsStats/getBrowserStats (이벤트 수 + 고유 사용자 수 동시 표시) | `CHANGELOG.md` v4.6.1 |
+| 2026-04-16 | 채널별 히트맵 탭 UX 전면 재설계 — 페이지→채널 역순 흐름을 채널 필터→페이지 목록→히트맵 3단계 드릴다운으로 교체. source/medium/campaign 계단식 필터, 페이지 목록 maxH 스크롤, 세션/도달률 헤더 클릭 정렬. 목업 데이터(MOCK_PAGE/MOCK_HEATMAP/MOCK_STATS) 전면 제거. ScrollHeatmapPanel·ScrollStatsPanel·FilterChip 컴포넌트 분리 | `프론트엔드_구축_계획.md` |
 
 ### 어드민 시스템 이식 상세 (2026-03-31)
 
