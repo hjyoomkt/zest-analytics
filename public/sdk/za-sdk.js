@@ -167,6 +167,7 @@
         return;
       }
 
+      const utmParams = this._getStoredUtmParams();
       const payload = {
         tracking_id: this.trackingId,
         event_type: 'pageview',
@@ -176,6 +177,11 @@
         session_id: this.sessionId,
         visitor_id: this.visitorId,
         channel: this._detectChannel(),
+        utm_source:   utmParams?.utm_source   || null,
+        utm_medium:   utmParams?.utm_medium   || null,
+        utm_campaign: utmParams?.utm_campaign || null,
+        utm_term:     utmParams?.utm_term     || null,
+        utm_content:  utmParams?.utm_content  || null,
         is_new_visitor: this.isNewVisitor,
         ...this._getDeviceInfo(),
       };
@@ -375,25 +381,39 @@
     }
 
     /**
-     * 유입 채널 감지
+     * localStorage에 저장된 UTM 파라미터 반환 (만료 시 null)
+     * @private
+     */
+    _getStoredUtmParams() {
+      try {
+        const stored = localStorage.getItem('za_params');
+        if (!stored) return null;
+        const params = JSON.parse(stored);
+        if (params.clicked_at) {
+          const daysSince = (Date.now() - new Date(params.clicked_at)) / (1000 * 60 * 60 * 24);
+          if (daysSince > this.config.attributionWindow) {
+            localStorage.removeItem('za_params');
+            return null;
+          }
+        }
+        return params;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    /**
+     * 유입 채널 감지 (고수준 채널 카테고리 반환, utm_source 값을 그대로 반환하지 않음)
      * @private
      */
     _detectChannel() {
       try {
-        // UTM/ZA 파라미터 우선 적용
-        const stored = localStorage.getItem('za_params');
-        if (stored) {
-          const params = JSON.parse(stored);
-          // 어트리뷰션 윈도우(28일) 초과 시 무시
-          if (params.clicked_at) {
-            const daysSince = (Date.now() - new Date(params.clicked_at)) / (1000 * 60 * 60 * 24);
-            if (daysSince > this.config.attributionWindow) {
-              localStorage.removeItem('za_params');
-              return !document.referrer ? 'direct' : 'referral';
-            }
-          }
+        const params = this._getStoredUtmParams();
+        if (params) {
           const source = (params.utm_source || '').toLowerCase();
           const medium = (params.utm_medium || '').toLowerCase();
+
+          if (medium === 'email') return 'email';
 
           if (source) {
             if (source.includes('google')) return (medium === 'cpc' || medium === 'ppc' || medium === 'paid') ? 'google_ads' : 'google';
@@ -404,10 +424,22 @@
             if (source.includes('youtube')) return 'youtube';
             if (source.includes('tiktok')) return 'tiktok';
             if (source.includes('twitter') || source.includes('x')) return 'twitter';
-            if (medium === 'email') return 'email';
-            return source;
+            if (source.includes('bing')) return 'bing';
+            if (source.includes('yahoo')) return 'yahoo';
+            // 알 수 없는 소스 → referrer로 플랫폼 판별
+            const r2 = (document.referrer || '').toLowerCase();
+            if (r2.includes('facebook.com') || r2.includes('l.facebook.com')) return 'facebook';
+            if (r2.includes('instagram.com')) return 'instagram';
+            if (r2.includes('naver.com')) return 'naver';
+            if (r2.includes('google.com')) return 'google';
+            if (r2.includes('daum.net') || r2.includes('kakao.com')) return 'kakao';
+            if (r2.includes('youtube.com')) return 'youtube';
+            if (r2.includes('tiktok.com')) return 'tiktok';
+            if (r2.includes('twitter.com') || r2.includes('x.com')) return 'twitter';
+            if (r2.includes('bing.com')) return 'bing';
+            if (r2.includes('yahoo.com')) return 'yahoo';
+            return 'referral';
           }
-          if (medium === 'email') return 'email';
         }
 
         // referrer 분석
@@ -654,6 +686,7 @@
       if (!this.trackingId || this.accumulatedTime < this.MIN_SESSION_DURATION) return;
 
       const deviceInfo = this._getDeviceInfo();
+      const utmParams = this._getStoredUtmParams();
       fetch(API_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -666,6 +699,11 @@
           scroll_depth: this.maxScrollDepth,
           scroll_buckets: this.scrollBuckets,
           channel: this._detectChannel(),
+          utm_source:   utmParams?.utm_source   || null,
+          utm_medium:   utmParams?.utm_medium   || null,
+          utm_campaign: utmParams?.utm_campaign || null,
+          utm_term:     utmParams?.utm_term     || null,
+          utm_content:  utmParams?.utm_content  || null,
           device_type: deviceInfo.device_type,
         }),
         keepalive: true,
