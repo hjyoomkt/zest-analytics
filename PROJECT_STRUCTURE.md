@@ -284,7 +284,7 @@ src/views/
 │   │       ├── columnsData.js / tableData*.json (4개)
 │   │
 │   ├── trafficSource/                   유입 경로 분석 페이지 (/admin/traffic-source)
-│   │   ├── index.jsx                    메인 페이지. Tabs(유입 경로 / 유입 키워드) 구조. Ctrl/Cmd+클릭 다중 비교 선택
+│   │   ├── index.jsx                    메인 페이지. Tabs(유입 경로 / 유입 키워드 / 경로 탐색) 구조. Ctrl/Cmd+클릭 다중 비교 선택
 │   │   └── components/
 │   │       ├── ReferrerChart.jsx        시간대별(0~23시) 유입 소스별 라인 차트 (ApexCharts)
 │   │       │                            - 지표 드롭다운: DateRangePicker 스타일 Menu/MenuItem (8개 지표)
@@ -296,13 +296,20 @@ src/views/
 │   │       │                            - 기본 지표 9개 + 추가 지표 5개 (zest-analytics 지표 포함)
 │   │       │                            - 합계 행 자동 계산 / 행 클릭 → 차트 소스 선택 연동
 │   │       │                            - 정렬, 모듈 레벨 캐시 적용
-│   │       └── KeywordTable.jsx         자연검색 유입 키워드별 전환 지표 테이블
-│   │                                    - page_referrer 파싱으로 키워드 추출 (DB 스키마 변경 없음)
-│   │                                    - 지원: 네이버/다음/빙/네이트/야후. 구글=(not provided)
-│   │                                    - 세션 단위 전환 귀속 (구매/회원가입/리드)
-│   │                                    - 열 선택/저장: localStorage(keyword_table_visible_cols)
-│   │                                    - 헤더 검색엔진별 방문자 수 배지. (not provided) 툴팁 안내
-│   │                                    - 추후 Google Search Console API 연동 예정
+│   │       ├── KeywordTable.jsx         자연검색 유입 키워드별 전환 지표 테이블
+│   │       │                            - page_referrer 파싱으로 키워드 추출 (DB 스키마 변경 없음)
+│   │       │                            - 지원: 네이버/다음/빙/네이트/야후. 구글=(not provided)
+│   │       │                            - 세션 단위 전환 귀속 (구매/회원가입/리드)
+│   │       │                            - 열 선택/저장: localStorage(keyword_table_visible_cols)
+│   │       │                            - 헤더 검색엔진별 방문자 수 배지. (not provided) 툴팁 안내
+│   │       │                            - 추후 Google Search Console API 연동 예정
+│   │       └── NavigationFlow.jsx       세션 내 페이지 이동 흐름 (경로 탐색 탭)
+│   │                                    - 단계별(최대 6단계) 컬럼 레이아웃, 카드 클릭으로 경로 필터
+│   │                                    - 표시 모드 5가지: 타이틀명 / 타이틀(경로) / 타이틀(전체경로) / 전체경로 / 경로만
+│   │                                      · 타이틀(경로): "상품 상세 페이지 (/shop/)" 형식
+│   │                                      · 타이틀(전체경로): "상품 상세 페이지 (/shop/?idx=79)" 형식
+│   │                                    - 최대 6단계 / 단계별 최대 8개 카드(더 보기 가능)
+│   │                                    - 세션 종료 카드, 선택 경로 breadcrumb, 필터 초기화 버튼
 │   │
 │   ├── heatmap/                         UX 스크롤 히트맵 페이지 (독립 페이지, /admin/heatmap)
 │   │   └── index.jsx                    HeatmapViewer를 감싸는 페이지 컴포넌트
@@ -332,6 +339,19 @@ src/views/
 │       │                                - iframe 실제 페이지 미리보기 + 우측 56px 수직 컬러 바
 │       │                                - 우측 통계: 방문자/페이지뷰/평균 도달률/세션 수 + 도달 구간 + SVG 추이 차트
 │       │                                - iframe 페이지 이동 감지: SDK postMessage(za_pageview) 수신
+│       │                                ── 탭 3종 ──
+│       │                                - 스크롤 히트맵: 정규화 URL 기준 전체 채널 합산
+│       │                                - 스크롤 히트맵(채널분리): raw_urls에서 UTM 파싱 → 채널 카드 선택 → 단일 URL 조회
+│       │                                  ⚠️ 재설계 필요: URL UTM 파싱 방식은 랜딩 페이지에만 적용됨
+│       │                                  → za_events.utm_source/medium 컬럼 기준 필터로 교체해야 함
+│       │                                - 클릭 히트맵: UI 구현 완료, 수집 비활성화(준비중 표시)
+│       │                                ── URL 정규화 ──
+│       │                                - 페이지 드롭다운: UTM·광고 파라미터 제거 후 그룹핑, "URL 변형 N개" 표시
+│       │                                - iframe URL: raw_urls[0] 사용 (hostname 유지)
+│       │                                - selectedRawUrls useMemo: 정규화 URL → 원본 URL 배열 역조회
+│       │                                ── 목업 데이터 ──
+│       │                                - MOCK_PAGE / MOCK_HEATMAP / MOCK_STATS 상수로 5개 채널 목업 주입
+│       │                                - 드롭다운에 "[데모] /shop/spring-sale" 항목으로 표시
 │       ├── services/
 │       │   └── zaService.js             Supabase API 호출 (za_tracking_codes, za_events) + normalizeUrl() URL 정규화 헬퍼
 │       │                                ── 추적 코드 관리 ──
@@ -349,9 +369,14 @@ src/views/
 │       │                                - getPageScrollStats → get_page_scroll_stats RPC (25/50/75/100% 도달률)
 │       │                                - getChannelPerformance → get_channel_performance RPC (채널별 종합 성과)
 │       │                                ── UX 히트맵 ──
-│       │                                - getHeatmapPageList → get_heatmap_page_list RPC (데이터 있는 페이지 URL 목록)
-│       │                                - getScrollHeatmap → get_scroll_heatmap RPC (10개 bucket 도달률)
-│       │                                - getHeatmapPageStats → za_events 직접 쿼리 (방문자/페이지뷰/도달률 요약)
+│       │                                - getHeatmapPageList → get_heatmap_page_list RPC
+│       │                                  결과를 normalizeUrl()로 그룹핑 → { page_url(정규화), session_count(합산), raw_urls[] } 반환
+│       │                                - getScrollHeatmap(pageUrls[]) → 원본 URL 각각 get_scroll_heatmap RPC 병렬 호출
+│       │                                  버킷(0~9)별 reached_count / total_count 합산 후 reach_pct 재계산
+│       │                                - getHeatmapPageStats(pageUrls[]) → za_events 직접 쿼리, .in('page_url', urls)
+│       │                                  방문자/페이지뷰/도달률 요약, reach10~reach100 구간별 도달률
+│       │                                - getClickHeatmap(pageUrls[]) → za_click_events .in('page_url', urls)
+│       │                                - getClickTopElements(pageUrls[]) → za_click_events .in('page_url', urls), 클라이언트 집계
 │       │                                ── 메인 대시보드 ──
 │       │                                - getDashboardKPIs → za_events 직접 쿼리
 │       │                                  방문자수/방문자당PV/평균체류시간/평균스크롤깊이/신규방문/재방문
@@ -562,7 +587,7 @@ src/assets/
 | `src/views/admin/zestAnalytics/services/zaService.js` | Supabase API 서비스. 파일 상단 `normalizeUrl()` 헬퍼로 트래킹 파라미터(gclid, fbclid, utm_* 등) 제거 후 URL 집계 |
 | `src/views/admin/zestAnalytics/components/EventStatistics.jsx` | KPI 카드 |
 | `src/views/admin/zestAnalytics/components/ChannelAnalytics.jsx` | GA 스타일 채널·소스·미디엄·캠페인 분석 테이블 (열 선택, 정렬, 캐시) |
-| `src/views/admin/zestAnalytics/components/HeatmapViewer.jsx` | 스크롤/클릭 히트맵 뷰어. 탭 토글(스크롤·클릭), 클릭 히트맵 UI 완성. **클릭 수집 비활성화** (SDK 주석 처리) |
+| `src/views/admin/zestAnalytics/components/HeatmapViewer.jsx` | 스크롤/클릭 히트맵 뷰어. 탭 3종(스크롤·채널분리·클릭). URL 정규화(raw_urls[] 그룹핑). 채널분리 탭은 raw_url UTM 파싱 방식으로 구현(재설계 필요). **클릭 수집 비활성화** |
 | `src/views/admin/zestAnalytics/components/AttributionAnalysis.jsx` | 어트리뷰션 분석 ※ 미사용 |
 | `src/views/admin/zestAnalytics/components/CampaignPerformance.jsx` | 캠페인 성과 테이블 ※ 미사용 |
 | `src/views/admin/zestAnalytics/components/TrackingCodeManager.jsx` | 추적 코드 관리 (superadmin/clientadmin에서 사용) |

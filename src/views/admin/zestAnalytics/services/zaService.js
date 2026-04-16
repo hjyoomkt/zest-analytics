@@ -604,13 +604,16 @@ export const getChannelPerformance = async ({
 
 /**
  * 히트맵용 페이지 URL 목록 (session_end 데이터 있는 페이지)
+ * 트래킹 파라미터를 제거한 정규화 URL로 그룹핑하여 반환
  * @param {object} params
  * @param {string|null} params.advertiserId
  * @param {Array<string>} params.availableAdvertiserIds
  * @param {string} params.startDate - YYYY-MM-DD
  * @param {string} params.endDate   - YYYY-MM-DD
  * @param {string|null} params.deviceType - 'desktop'|'mobile'|'tablet'|null(전체)
- * @returns {Promise<Array<{page_url, session_count, avg_depth}>>}
+ * @returns {Promise<Array<{page_url, session_count, avg_depth, raw_urls}>>}
+ *   page_url : 정규화된 URL (드롭다운 표시용)
+ *   raw_urls : 해당 정규화 URL에 속하는 원본 URL 배열 (데이터 조회용)
  */
 export const getHeatmapPageList = async ({
   advertiserId,
@@ -631,11 +634,30 @@ export const getHeatmapPageList = async ({
     });
 
     if (error) throw error;
-    return (data || []).map((row) => ({
-      ...row,
-      session_count: Number(row.session_count),
-      avg_depth: Number(row.avg_depth),
-    }));
+
+    // 트래킹 파라미터 제거 후 정규화 URL 기준으로 그룹핑
+    const groups = new Map();
+    (data || []).forEach((row) => {
+      const normalized = normalizeUrl(row.page_url) || row.page_url;
+      const count = Number(row.session_count);
+      const depth = Number(row.avg_depth);
+      if (!groups.has(normalized)) {
+        groups.set(normalized, { page_url: normalized, session_count: 0, depth_sum: 0, raw_urls: [] });
+      }
+      const g = groups.get(normalized);
+      g.session_count += count;
+      g.depth_sum += depth * count;
+      g.raw_urls.push(row.page_url);
+    });
+
+    return Array.from(groups.values())
+      .map((g) => ({
+        page_url: g.page_url,
+        session_count: g.session_count,
+        avg_depth: g.session_count > 0 ? Math.round(g.depth_sum / g.session_count) : 0,
+        raw_urls: g.raw_urls,
+      }))
+      .sort((a, b) => b.session_count - a.session_count);
   } catch (error) {
     console.error('[ZA Service] getHeatmapPageList error:', error);
     throw error;
@@ -656,14 +678,15 @@ export const getHeatmapPageList = async ({
 export const getScrollHeatmap = async ({
   advertiserId,
   availableAdvertiserIds,
-  pageUrl,
+  pageUrls,   // 정규화 URL에 속하는 원본 URL 배열
   startDate,
   endDate,
   deviceType = null,
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
-    if (ids.length === 0 || !pageUrl) {
+    const urls = Array.isArray(pageUrls) ? pageUrls.filter(Boolean) : [];
+    if (ids.length === 0 || urls.length === 0) {
       return Array.from({ length: 10 }, (_, i) => ({
         bucket_index: i,
         reached_count: 0,
@@ -672,35 +695,42 @@ export const getScrollHeatmap = async ({
       }));
     }
 
-    const { data, error } = await supabase.rpc('get_scroll_heatmap', {
-      p_advertiser_ids: ids,
-      p_page_url: pageUrl,
-      p_start: `${startDate}T00:00:00+09:00`,
-      p_end: `${endDate}T23:59:59+09:00`,
-      p_device_type: deviceType,
-    });
+    // 각 원본 URL에 대해 RPC 호출 후 버킷별로 합산
+    const allResults = await Promise.all(
+      urls.map((pageUrl) =>
+        supabase.rpc('get_scroll_heatmap', {
+          p_advertiser_ids: ids,
+          p_page_url: pageUrl,
+          p_start: `${startDate}T00:00:00+09:00`,
+          p_end: `${endDate}T23:59:59+09:00`,
+          p_device_type: deviceType,
+        })
+      )
+    );
 
-    if (error) throw error;
-
-    // 결과를 10개 배열로 정규화
-    const result = Array.from({ length: 10 }, (_, i) => ({
+    const merged = Array.from({ length: 10 }, (_, i) => ({
       bucket_index: i,
       reached_count: 0,
       total_count: 0,
       reach_pct: 0,
     }));
 
-    (data || []).forEach(({ bucket_index, reached_count, total_count }) => {
-      const idx = Number(bucket_index);
-      if (idx >= 0 && idx < 10) {
-        result[idx].reached_count = Number(reached_count);
-        result[idx].total_count = Number(total_count);
-        result[idx].reach_pct =
-          total_count > 0 ? Math.round((reached_count / total_count) * 100) : 0;
-      }
+    allResults.forEach(({ data, error }) => {
+      if (error) return;
+      (data || []).forEach(({ bucket_index, reached_count, total_count }) => {
+        const idx = Number(bucket_index);
+        if (idx >= 0 && idx < 10) {
+          merged[idx].reached_count += Number(reached_count);
+          merged[idx].total_count   += Number(total_count);
+        }
+      });
     });
 
-    return result;
+    merged.forEach((b) => {
+      b.reach_pct = b.total_count > 0 ? Math.round((b.reached_count / b.total_count) * 100) : 0;
+    });
+
+    return merged;
   } catch (error) {
     console.error('[ZA Service] getScrollHeatmap error:', error);
     throw error;
@@ -721,27 +751,28 @@ export const getScrollHeatmap = async ({
 export const getHeatmapPageStats = async ({
   advertiserId,
   availableAdvertiserIds,
-  pageUrl,
+  pageUrls,   // 정규화 URL에 속하는 원본 URL 배열
   startDate,
   endDate,
   deviceType = null,
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
-    if (ids.length === 0 || !pageUrl) {
+    const urls = Array.isArray(pageUrls) ? pageUrls.filter(Boolean) : [];
+    if (ids.length === 0 || urls.length === 0) {
       return { visitors: 0, pageviews: 0, avgScrollDepth: 0, reach10: 0, reach20: 0, reach30: 0, reach40: 0, reach50: 0, reach60: 0, reach70: 0, reach80: 0, reach90: 0, reach100: 0, totalSessions: 0 };
     }
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs   = `${endDate}T23:59:59+09:00`;
 
-    // 페이지뷰 + 방문자
+    // 페이지뷰 + 방문자 (정규화 URL의 모든 원본 URL 포함)
     let pvQuery = supabase
       .from('za_events')
       .select('visitor_id')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
-      .eq('page_url', pageUrl)
+      .in('page_url', urls)
       .gte('created_at', startTs)
       .lte('created_at', endTs);
     if (deviceType) pvQuery = pvQuery.eq('device_type', deviceType);
@@ -752,7 +783,7 @@ export const getHeatmapPageStats = async ({
       .select('scroll_depth')
       .in('advertiser_id', ids)
       .eq('event_type', 'session_end')
-      .eq('page_url', pageUrl)
+      .in('page_url', urls)
       .not('scroll_depth', 'is', null)
       .gte('created_at', startTs)
       .lte('created_at', endTs);
@@ -818,20 +849,21 @@ export const getHeatmapPageStats = async ({
 export const getClickHeatmap = async ({
   advertiserId,
   availableAdvertiserIds,
-  pageUrl,
+  pageUrls,   // 정규화 URL에 속하는 원본 URL 배열
   startDate,
   endDate,
   deviceType = null,
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
-    if (ids.length === 0 || !pageUrl) return [];
+    const urls = Array.isArray(pageUrls) ? pageUrls.filter(Boolean) : [];
+    if (ids.length === 0 || urls.length === 0) return [];
 
     let query = supabase
       .from('za_click_events')
       .select('click_x, click_y')
       .in('advertiser_id', ids)
-      .eq('page_url', pageUrl)
+      .in('page_url', urls)
       .gte('created_at', `${startDate}T00:00:00+09:00`)
       .lte('created_at', `${endDate}T23:59:59+09:00`);
 
@@ -865,7 +897,7 @@ export const getClickHeatmap = async ({
 export const getClickTopElements = async ({
   advertiserId,
   availableAdvertiserIds,
-  pageUrl,
+  pageUrls,   // 정규화 URL에 속하는 원본 URL 배열
   startDate,
   endDate,
   deviceType = null,
@@ -873,13 +905,14 @@ export const getClickTopElements = async ({
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
-    if (ids.length === 0 || !pageUrl) return [];
+    const urls = Array.isArray(pageUrls) ? pageUrls.filter(Boolean) : [];
+    if (ids.length === 0 || urls.length === 0) return [];
 
     let query = supabase
       .from('za_click_events')
       .select('element_tag, element_text, element_selector')
       .in('advertiser_id', ids)
-      .eq('page_url', pageUrl)
+      .in('page_url', urls)
       .gte('created_at', `${startDate}T00:00:00+09:00`)
       .lte('created_at', `${endDate}T23:59:59+09:00`);
 

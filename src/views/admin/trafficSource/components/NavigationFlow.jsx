@@ -41,9 +41,11 @@ const SESSION_LIMIT = 100000;
 
 /**
  * { path, title } 방문 객체에서 표시 모드에 맞는 라벨 반환
- * - 'title' : page_title (없으면 전체 경로로 fallback)
- * - 'full'  : /shop/?idx=79
- * - 'path'  : /shop/
+ * - 'title'      : page_title (없으면 전체 경로로 fallback)
+ * - 'title_path' : page_title | /shop/
+ * - 'title_full' : page_title | /shop/?idx=79
+ * - 'full'       : /shop/?idx=79
+ * - 'path'       : /shop/
  */
 function getLabel(visit, mode) {
   if (!visit) return '(알 수 없음)';
@@ -51,6 +53,16 @@ function getLabel(visit, mode) {
 
   if (mode === 'title') {
     return (title && title.trim()) ? title.trim() : normPathStr(path, 'full');
+  }
+  if (mode === 'title_path') {
+    const t = (title && title.trim()) ? title.trim() : null;
+    const p = normPathStr(path, 'path');
+    return t ? `${t} (${p})` : p;
+  }
+  if (mode === 'title_full') {
+    const t = (title && title.trim()) ? title.trim() : null;
+    const p = normPathStr(path, 'full');
+    return t ? `${t} (${p})` : p;
   }
   return normPathStr(path, mode);
 }
@@ -275,9 +287,11 @@ function StepColumn({ step, selectedLabel, onPageClick }) {
 // ── 메인 컴포넌트 ──────────────────────────────────────────────────────────────
 
 const PATH_MODES = [
-  { value: 'title', label: '타이틀명', example: '상품 상세 페이지' },
-  { value: 'full',  label: '전체 경로', example: '/shop/?idx=79'   },
-  { value: 'path',  label: '경로만',    example: '/shop/'           },
+  { value: 'title',      label: '타이틀명',        example: '상품 상세 페이지'                    },
+  { value: 'title_path', label: '타이틀(경로)',     example: '상품 상세 페이지 (/shop/)'           },
+  { value: 'title_full', label: '타이틀(전체경로)', example: '상품 상세 페이지 (/shop/?idx=79)'    },
+  { value: 'full',       label: '전체 경로',        example: '/shop/?idx=79'                       },
+  { value: 'path',       label: '경로만',           example: '/shop/'                              },
 ];
 
 export default function NavigationFlow({
@@ -339,7 +353,7 @@ export default function NavigationFlow({
 
   // 타이틀 모드인데 타이틀 데이터가 없는지 체크
   const hasTitleData = useMemo(() => {
-    if (pathMode !== 'title') return true;
+    if (!['title', 'title_path', 'title_full'].includes(pathMode)) return true;
     return sessions.some((sess) => sess.some((v) => v.title && v.title.trim()));
   }, [sessions, pathMode]);
 
@@ -375,7 +389,7 @@ export default function NavigationFlow({
               <Tooltip key={mode.value} label={`예: ${mode.example}`} placement="top" hasArrow>
                 <Button
                   size="sm"
-                  px="14px"
+                  px="10px"
                   py="6px"
                   h="auto"
                   borderRadius={0}
@@ -409,7 +423,7 @@ export default function NavigationFlow({
       </Flex>
 
       {/* ── 타이틀 데이터 없음 안내 ── */}
-      {pathMode === 'title' && !loading && sessions.length > 0 && !hasTitleData && (
+      {['title', 'title_path', 'title_full'].includes(pathMode) && !loading && sessions.length > 0 && !hasTitleData && (
         <Flex
           px={6} py="10px"
           align="center"

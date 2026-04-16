@@ -1,5 +1,100 @@
 # Changelog
 
+## [4.6.17] 2026-04-16
+
+### 유입 경로 분석 — 경로 탐색 표시 모드 추가 (`NavigationFlow.jsx`)
+
+기존 3가지 표시 모드(타이틀명 / 전체 경로 / 경로만)에 2가지 추가:
+
+| 모드 | 예시 |
+|------|------|
+| 타이틀(경로) *(신규)* | `상품 상세 페이지 (/shop/)` |
+| 타이틀(전체경로) *(신규)* | `상품 상세 페이지 (/shop/?idx=79)` |
+
+- `PATH_MODES` 배열에 `title_path` / `title_full` 추가
+- `getLabel()` 함수에 두 모드 처리 추가 — 타이틀 없으면 경로로 fallback
+- 타이틀 없음 안내 배너 조건을 새 모드까지 포함하도록 확장
+- 버튼 5개로 늘어나 패딩을 `px="10px"`으로 축소
+
+---
+
+### 히트맵 — URL 정규화 및 채널 분리 뷰 (`HeatmapViewer.jsx`, `zaService.js`)
+
+#### URL 정규화 (트래킹 파라미터 제거)
+
+**문제**: 히트맵 페이지 드롭다운에 동일 페이지가 UTM/광고 파라미터별로 별도 항목으로 표시됨
+
+**수정**:
+- `zaService.js`에 이미 있는 `normalizeUrl()` / `TRACKING_PARAMS`를 히트맵 함수에도 적용
+- `getHeatmapPageList()` — RPC 결과를 정규화 URL로 그룹핑, `session_count` 합산, `raw_urls[]` 반환
+- `getScrollHeatmap()` — `pageUrl` → `pageUrls[]` 배열로 변경. RPC를 원본 URL 각각 호출 후 버킷별 카운트 합산
+- `getHeatmapPageStats()` — `.eq('page_url', ...)` → `.in('page_url', urls)` 로 변경
+- `getClickHeatmap()`, `getClickTopElements()` — 동일하게 `.in()` 처리
+- `HeatmapViewer.jsx` — `selectedRawUrls` useMemo 추가, 서비스 호출 시 `pageUrls: selectedRawUrls` 전달
+- 드롭다운 옵션: 변형이 여러 개인 경우 `· URL 변형 N개` 표시
+
+#### iframe URL 버그 수정
+
+**원인**: `normalizeUrl()`이 hostname을 제거하고 pathname만 반환 → iframe이 `localhost:3000/...` (어드민 페이지)를 로드
+
+**수정**: iframe URL은 `selectedRawUrls[0]` (원본 전체 URL) 기준으로 구성, 주소 표시줄 hostname도 동일하게 수정
+
+#### 스크롤 히트맵(채널분리) 탭 추가
+
+- 탭 3개: **스크롤 히트맵** / **스크롤 히트맵(채널분리)** / 클릭 히트맵(준비중)
+- 채널분리 탭: 선택된 정규화 페이지의 `raw_urls`에서 UTM 파라미터를 파싱해 채널 카드로 표시
+- 채널 카드 클릭 → 해당 단일 raw URL의 스크롤 데이터 및 통계 로드
+- 목업 데이터 5개 채널 (google/cpc, naver/cpc, facebook/social, kakao/display, 직접방문) — `[데모]` 레이블로 드롭다운 구분
+
+> ⚠️ **현재 한계 및 재설계 필요**: `raw_url`의 UTM 파싱 방식은 랜딩 페이지에만 적용되며, 이후 페이지 이동(장바구니, 상세페이지 등)에는 UTM이 URL에 없음. `za_events`의 `utm_source`/`utm_medium` 컬럼(세션 단위 어트리뷰션)을 기준으로 필터링하는 방식으로 재설계 필요.
+
+---
+
+## [4.6.16] 2026-04-16
+
+### 버그 수정 — SDK MPA 세션 연속성 (경로 탐색 단계 미기록 문제)
+
+**현상**
+- zestmkt.co.kr에서 홈 → 상품목록 → 상품상세 → 홈 순서로 이동해도, 경로 탐색 분석에서 모든 페이지가 "시작 페이지" 1단계에만 찍히고 2단계 이후로 넘어가지 않음
+
+**원인**
+- SDK 생성자에서 `sessionId`를 매번 `Date.now() + random`으로 새로 생성
+- zestmkt.co.kr은 MPA(페이지마다 전체 새로고침)이므로, 페이지 이동 시 JS 컨텍스트 초기화 → SDK 재초기화 → 새 `session_id` 생성
+- 결과: 각 페이지가 1-페이지짜리 별도 세션으로 기록 → `getNavigationPaths()`가 session_id별로 묶으면 단계가 1개뿐
+
+**수정 — `sdk/index.js` + `public/sdk/za-sdk.js`**
+
+- `_getOrCreateSessionId()` 메서드 추가 (`sessionStorage` 기반)
+  - `sessionStorage('za_sid')`에 `{ id, ts }` 저장
+  - 30분 이내 재방문이면 기존 `id` 재사용 + 타임스탬프 갱신
+  - 30분 초과 또는 첫 방문이면 새 세션 생성 + 저장
+- 생성자 `this.sessionId = 'ses_...'` → `this.sessionId = this._getOrCreateSessionId()`
+- `_resetSession()` (30분 idle 후 세션 종료 시) — `sessionStorage.removeItem('za_sid')` 추가 → 완전한 새 세션 생성
+
+**영향**
+- MPA 사이트에서 30분 내 페이지 이동은 동일 세션으로 기록
+- 경로 탐색: 홈 → /shop → /shop/?idx=10 → 홈 이탈 → 4단계 경로 정상 기록 확인
+- SPA 사이트 무영향 (세션 ID가 유지되어도 동작 동일)
+
+---
+
+### 날짜 프리셋 — 오늘 포함으로 변경
+
+**수정 — `src/contexts/DateRangeContext.js`**
+
+| 프리셋 | 변경 전 | 변경 후 |
+|--------|---------|---------|
+| 최근 7일 (기본값) | 7일전 ~ 어제 | **6일전 ~ 오늘** |
+| 최근 14일 | 14일전 ~ 어제 | 13일전 ~ 오늘 |
+| 최근 30일 | 30일전 ~ 어제 | 29일전 ~ 오늘 |
+| 이번 주 | 이번주 월요일 ~ 어제 | 이번주 월요일 ~ 오늘 |
+| 이번 달 | 이번달 1일 ~ 어제 | 이번달 1일 ~ 오늘 |
+
+- `지난주` / `지난달`은 확정 기간이므로 변경 없음
+- 기본값(`getDefaultRange()`)도 동일하게 6일전~오늘로 변경
+
+---
+
 ## [4.6.15] 2026-04-15
 
 ### localhost 및 히트맵 미리보기 트래픽 필터링
