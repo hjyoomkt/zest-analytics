@@ -17,6 +17,7 @@ import {
 import { getUserStats } from "services/supabaseService";
 import { useAuth } from "contexts/AuthContext";
 import TrackingCodeManager from "views/admin/zestAnalytics/components/TrackingCodeManager";
+import GscKeywordSection from "views/admin/trafficSource/components/GscKeywordSection";
 
 export default function SuperAdminDashboard() {
   const brandColor = useColorModeValue("brand.500", "white");
@@ -138,6 +139,17 @@ export default function SuperAdminDashboard() {
           availableAdvertisers={availableAdvertisers}
           selectedBrandId={selectedBrandId}
           onBrandChange={setSelectedBrandId}
+        />
+      </Box>
+
+      <Box mt="20px">
+        <Text color={textColor} fontSize="xl" fontWeight="700" mb="16px">
+          Google Search Console 연동
+        </Text>
+        <GscKeywordSection
+          advertiserId={selectedBrandId || null}
+          startDate={null}
+          endDate={null}
         />
       </Box>
     </Box>

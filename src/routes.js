@@ -12,6 +12,7 @@ import {
   MdBusiness,
   MdOutlineWaterDrop,
   MdCallSplit,
+  MdAdminPanelSettings,
 } from 'react-icons/md';
 
 // Admin Imports
@@ -80,6 +81,15 @@ const routes = [
     icon: <Icon as={MdBusiness} width="20px" height="20px" color="inherit" />,
     component: <ClientAdminDashboard />,
     requiresPermission: 'brandadmin',
+    showInSidebar: true,
+  },
+  {
+    name: '마스터 콘솔',
+    layout: '/masteradmin',
+    path: '/ip-filter',
+    icon: <Icon as={MdAdminPanelSettings} width="20px" height="20px" color="inherit" />,
+    component: null,
+    requiresPermission: 'master',
     showInSidebar: true,
   },
   {

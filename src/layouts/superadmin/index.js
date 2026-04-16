@@ -30,6 +30,7 @@ export default function SuperAdminLayout(props) {
     return ['master', 'agency_admin', 'agency_manager'].includes(role);
   };
 
+
   if (loading) {
     return null;
   }

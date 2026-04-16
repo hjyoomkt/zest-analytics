@@ -197,6 +197,89 @@ export const deleteTrackingCode = async (codeId) => {
 };
 
 // ============================================================================
+// IP 차단 목록 캐시 (내부 관리자 데이터 필터링용)
+// ============================================================================
+
+let _ipBlocklistCache = null;
+let _ipBlocklistCacheAt = 0;
+const IP_CACHE_TTL = 60_000; // 1분
+
+const _getBlockedIpsCached = async () => {
+  if (_ipBlocklistCache !== null && Date.now() - _ipBlocklistCacheAt < IP_CACHE_TTL) {
+    return _ipBlocklistCache;
+  }
+  try {
+    const { data, error } = await supabase.from('za_ip_blocklist').select('ip_address');
+    console.log('[IP Filter] blocklist fetch:', { data, error });
+    _ipBlocklistCache = (data || []).map((r) => r.ip_address);
+    _ipBlocklistCacheAt = Date.now();
+  } catch (e) {
+    console.log('[IP Filter] blocklist fetch exception:', e);
+    if (_ipBlocklistCache === null) _ipBlocklistCache = [];
+  }
+  return _ipBlocklistCache;
+};
+
+export const invalidateIpBlocklistCache = () => {
+  _ipBlocklistCache = null;
+  _ipBlocklistCacheAt = 0;
+};
+
+const _applyIpFilter = (query, blockedIps) => {
+  if (blockedIps && blockedIps.length > 0) {
+    // inet 타입은 /32 형태로 저장되므로 CIDR 형식으로 정규화
+    const normalized = blockedIps.map((ip) => (ip.includes('/') ? ip : `${ip}/32`));
+    return query.not('ip_address', 'in', `(${normalized.join(',')})`);
+  }
+  return query;
+};
+
+// ============================================================================
+// IP 차단 목록 관리 (masteradmin 전용)
+// ============================================================================
+
+export const getBlockedIps = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('za_ip_blocklist')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('[ZA Service] getBlockedIps error:', error);
+    throw error;
+  }
+};
+
+export const addBlockedIp = async (ipAddress, description = null, createdBy = null) => {
+  try {
+    const { data, error } = await supabase
+      .from('za_ip_blocklist')
+      .insert({ ip_address: ipAddress.trim(), description, created_by: createdBy })
+      .select()
+      .single();
+    if (error) throw error;
+    invalidateIpBlocklistCache();
+    return data;
+  } catch (error) {
+    console.error('[ZA Service] addBlockedIp error:', error);
+    throw error;
+  }
+};
+
+export const removeBlockedIp = async (id) => {
+  try {
+    const { error } = await supabase.from('za_ip_blocklist').delete().eq('id', id);
+    if (error) throw error;
+    invalidateIpBlocklistCache();
+  } catch (error) {
+    console.error('[ZA Service] removeBlockedIp error:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
 // 이벤트 통계 조회
 // ============================================================================
 
@@ -216,7 +299,9 @@ export const getEventStatistics = async ({
   endDate,
 }) => {
   try {
+    const blockedIps = await _getBlockedIpsCached();
     let query = supabase.from('za_events').select('event_type, value, currency, is_attributed').neq('event_type', 'session_end');
+    query = _applyIpFilter(query, blockedIps);
 
     // 날짜 필터
     if (startDate && endDate) {
@@ -267,11 +352,13 @@ export const getAttributionStats = async ({
   endDate,
 }) => {
   try {
+    const blockedIps = await _getBlockedIpsCached();
     let query = supabase
       .from('za_events')
       .select('attribution_window, event_type, days_since_click')
       .eq('is_attributed', true)
       .in('event_type', ['purchase', 'signup', 'lead', 'add_to_cart']);
+    query = _applyIpFilter(query, blockedIps);
 
     // 날짜 필터
     if (startDate && endDate) {
@@ -319,9 +406,11 @@ export const getCampaignPerformance = async ({
   endDate,
 }) => {
   try {
+    const blockedIps = await _getBlockedIpsCached();
     let query = supabase
       .from('za_events')
       .select('utm_source, utm_medium, utm_campaign, event_type, value, days_since_click, is_attributed');
+    query = _applyIpFilter(query, blockedIps);
 
     // 날짜 필터
     if (startDate && endDate) {
@@ -404,11 +493,13 @@ export const getCampaignPerformance = async ({
  */
 export const getRecentEvents = async (advertiserId, availableAdvertiserIds, limit = 100) => {
   try {
+    const blockedIps = await _getBlockedIpsCached();
     let query = supabase
       .from('za_events')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(limit);
+    query = _applyIpFilter(query, blockedIps);
 
     // 광고주 필터
     if (advertiserId) {
@@ -461,10 +552,12 @@ export const getHourlyVisitors = async ({
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     if (ids.length === 0) return Array.from({ length: 24 }, (_, i) => ({ hour: i, visitor_count: 0 }));
 
+    const blockedIps = await _getBlockedIpsCached();
     const { data, error } = await supabase.rpc('get_hourly_visitors', {
       p_advertiser_ids: ids,
       p_start: `${startDate}T00:00:00+09:00`,
       p_end: `${endDate}T23:59:59+09:00`,
+      p_blocked_ips: blockedIps,
     });
 
     if (error) throw error;
@@ -495,10 +588,12 @@ export const getHourlyPageViews = async ({
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     if (ids.length === 0) return Array.from({ length: 24 }, (_, i) => ({ hour: i, pageview_count: 0 }));
 
+    const blockedIps = await _getBlockedIpsCached();
     const { data, error } = await supabase.rpc('get_hourly_pageviews', {
       p_advertiser_ids: ids,
       p_start: `${startDate}T00:00:00+09:00`,
       p_end: `${endDate}T23:59:59+09:00`,
+      p_blocked_ips: blockedIps,
     });
 
     if (error) throw error;
@@ -529,10 +624,12 @@ export const getPageScrollStats = async ({
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     if (ids.length === 0) return [];
 
+    const blockedIps = await _getBlockedIpsCached();
     const { data, error } = await supabase.rpc('get_page_scroll_stats', {
       p_advertiser_ids: ids,
       p_start: `${startDate}T00:00:00+09:00`,
       p_end: `${endDate}T23:59:59+09:00`,
+      p_blocked_ips: blockedIps,
     });
 
     if (error) throw error;
@@ -573,10 +670,12 @@ export const getChannelPerformance = async ({
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     if (ids.length === 0) return [];
 
+    const blockedIps = await _getBlockedIpsCached();
     const { data, error } = await supabase.rpc('get_channel_performance', {
       p_advertiser_ids: ids,
       p_start: `${startDate}T00:00:00+09:00`,
       p_end: `${endDate}T23:59:59+09:00`,
+      p_blocked_ips: blockedIps,
     });
 
     if (error) throw error;
@@ -626,11 +725,13 @@ export const getHeatmapPageList = async ({
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     if (ids.length === 0) return [];
 
+    const blockedIps = await _getBlockedIpsCached();
     const { data, error } = await supabase.rpc('get_heatmap_page_list', {
       p_advertiser_ids: ids,
       p_start: `${startDate}T00:00:00+09:00`,
       p_end: `${endDate}T23:59:59+09:00`,
       p_device_type: deviceType,
+      p_blocked_ips: blockedIps,
     });
 
     if (error) throw error;
@@ -695,6 +796,7 @@ export const getScrollHeatmap = async ({
       }));
     }
 
+    const blockedIps = await _getBlockedIpsCached();
     // 각 원본 URL에 대해 RPC 호출 후 버킷별로 합산
     const allResults = await Promise.all(
       urls.map((pageUrl) =>
@@ -704,6 +806,7 @@ export const getScrollHeatmap = async ({
           p_start: `${startDate}T00:00:00+09:00`,
           p_end: `${endDate}T23:59:59+09:00`,
           p_device_type: deviceType,
+          p_blocked_ips: blockedIps,
         })
       )
     );
@@ -765,6 +868,7 @@ export const getHeatmapPageStats = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs   = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
     // 페이지뷰 + 방문자 (정규화 URL의 모든 원본 URL 포함)
     let pvQuery = supabase
@@ -776,6 +880,7 @@ export const getHeatmapPageStats = async ({
       .gte('created_at', startTs)
       .lte('created_at', endTs);
     if (deviceType) pvQuery = pvQuery.eq('device_type', deviceType);
+    pvQuery = _applyIpFilter(pvQuery, blockedIps);
 
     // 스크롤 통계 (session_end)
     let seQuery = supabase
@@ -788,6 +893,7 @@ export const getHeatmapPageStats = async ({
       .gte('created_at', startTs)
       .lte('created_at', endTs);
     if (deviceType) seQuery = seQuery.eq('device_type', deviceType);
+    seQuery = _applyIpFilter(seQuery, blockedIps);
 
     const [pvResult, seResult] = await Promise.all([pvQuery, seQuery]);
 
@@ -964,26 +1070,31 @@ export const getDashboardKPIs = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
     // 페이지뷰 이벤트 조회 (방문자수, 페이지뷰, 신규/재방문)
-    const { data: pvData, error: pvError } = await supabase
+    let pvQuery = supabase
       .from('za_events')
       .select('visitor_id, session_id, page_url, is_new_visitor')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    pvQuery = _applyIpFilter(pvQuery, blockedIps);
+    const { data: pvData, error: pvError } = await pvQuery;
 
     if (pvError) throw pvError;
 
     // session_end 이벤트 조회 (체류시간, 스크롤, 신규/재방문)
-    const { data: seData, error: seError } = await supabase
+    let seQuery = supabase
       .from('za_events')
       .select('visitor_id, session_id, time_on_page, scroll_depth, is_new_visitor')
       .in('advertiser_id', ids)
       .eq('event_type', 'session_end')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    seQuery = _applyIpFilter(seQuery, blockedIps);
+    const { data: seData, error: seError } = await seQuery;
 
     if (seError) throw seError;
 
@@ -1066,8 +1177,9 @@ export const getDailyVisitorTrend = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let trendQuery = supabase
       .from('za_events')
       .select('visitor_id, session_id, event_type, created_at')
       .in('advertiser_id', ids)
@@ -1075,6 +1187,8 @@ export const getDailyVisitorTrend = async ({
       .gte('created_at', startTs)
       .lte('created_at', endTs)
       .order('created_at', { ascending: true });
+    trendQuery = _applyIpFilter(trendQuery, blockedIps);
+    const { data, error } = await trendQuery;
 
     if (error) throw error;
 
@@ -1116,14 +1230,17 @@ export const getDeviceStats = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('device_type, visitor_id')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1160,14 +1277,17 @@ export const getVisitorTypeStats = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let seQuery = supabase
       .from('za_events')
       .select('is_new_visitor')
       .in('advertiser_id', ids)
       .eq('event_type', 'session_end')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    seQuery = _applyIpFilter(seQuery, blockedIps);
+    const { data, error } = await seQuery;
 
     if (error) throw error;
 
@@ -1183,7 +1303,7 @@ export const getVisitorTypeStats = async ({
     }
 
     // fallback: pageview 기준
-    const { data: pvData, error: pvError } = await supabase
+    let pvQuery = supabase
       .from('za_events')
       .select('visitor_id, is_new_visitor')
       .in('advertiser_id', ids)
@@ -1191,6 +1311,8 @@ export const getVisitorTypeStats = async ({
       .gte('created_at', startTs)
       .lte('created_at', endTs)
       .not('is_new_visitor', 'is', null);
+    pvQuery = _applyIpFilter(pvQuery, blockedIps);
+    const { data: pvData, error: pvError } = await pvQuery;
 
     if (pvError) throw pvError;
 
@@ -1227,14 +1349,17 @@ export const getTopPages = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('page_url, visitor_id')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1273,14 +1398,17 @@ export const getBehaviorRates = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('event_type, is_bounce, session_id')
       .in('advertiser_id', ids)
       .in('event_type', ['session_end', 'page_refresh', 'page_back'])
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1319,14 +1447,17 @@ export const getTopActions = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('event_type, page_url, scroll_depth, event_name')
       .in('advertiser_id', ids)
       .neq('event_type', 'session_end')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) {
       console.error('[ZA Service] getTopActions query error:', error);
@@ -1378,8 +1509,9 @@ export const getTopReferrers = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('page_referrer, channel, visitor_id, session_id, created_at')
       .in('advertiser_id', ids)
@@ -1387,6 +1519,8 @@ export const getTopReferrers = async ({
       .gte('created_at', startTs)
       .lte('created_at', endTs)
       .order('created_at', { ascending: true });
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) {
       console.error('[ZA Service] getTopReferrers query error:', error);
@@ -1461,14 +1595,17 @@ export const getOsStats = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('os, visitor_id')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1506,14 +1643,17 @@ export const getBrowserStats = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('browser, visitor_id')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1546,6 +1686,7 @@ export const getDailyEventStats = async ({
   endDate,
 }) => {
   try {
+    const blockedIps = await _getBlockedIpsCached();
     let query = supabase
       .from('za_events')
       .select('created_at, event_type, value, is_attributed');
@@ -1562,6 +1703,7 @@ export const getDailyEventStats = async ({
       query = query.in('advertiser_id', availableAdvertiserIds);
     }
 
+    query = _applyIpFilter(query, blockedIps);
     const { data, error } = await query;
 
     if (error) throw error;
@@ -1625,6 +1767,7 @@ export const getUTMBreakdown = async ({
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     if (ids.length === 0) return [];
 
+    const blockedIps = await _getBlockedIpsCached();
     let query = supabase
       .from('za_events')
       .select(
@@ -1639,6 +1782,7 @@ export const getUTMBreakdown = async ({
         .lte('created_at', `${endDate}T23:59:59+09:00`);
     }
 
+    query = _applyIpFilter(query, blockedIps);
     const { data, error } = await query;
     if (error) throw error;
 
@@ -1781,8 +1925,9 @@ export const getReferrerBreakdown = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs   = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select(
         'visitor_id, session_id, event_type, page_referrer, channel, value, time_on_page, scroll_depth, created_at'
@@ -1792,6 +1937,8 @@ export const getReferrerBreakdown = async ({
       .gte('created_at', startTs)
       .lte('created_at', endTs)
       .order('created_at', { ascending: true });
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -1947,8 +2094,9 @@ export const getNavigationPaths = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs   = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('session_id, page_url, page_title, created_at')
       .in('advertiser_id', ids)
@@ -1958,6 +2106,8 @@ export const getNavigationPaths = async ({
       .order('session_id', { ascending: true })
       .order('created_at',  { ascending: true })
       .limit(100000);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -2016,14 +2166,17 @@ export const getReferrerHourlyData = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs   = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select('visitor_id, session_id, event_type, page_referrer, value, created_at')
       .in('advertiser_id', ids)
       .in('event_type', ['pageview', 'signup', 'purchase'])
       .gte('created_at', startTs)
       .lte('created_at', endTs);
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -2238,8 +2391,9 @@ export const getKeywordBreakdown = async ({
 
     const startTs = `${startDate}T00:00:00+09:00`;
     const endTs   = `${endDate}T23:59:59+09:00`;
+    const blockedIps = await _getBlockedIpsCached();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('za_events')
       .select(
         'visitor_id, session_id, event_type, page_referrer, value, created_at'
@@ -2249,6 +2403,8 @@ export const getKeywordBreakdown = async ({
       .gte('created_at', startTs)
       .lte('created_at', endTs)
       .order('created_at', { ascending: true });
+    query = _applyIpFilter(query, blockedIps);
+    const { data, error } = await query;
 
     if (error) throw error;
 

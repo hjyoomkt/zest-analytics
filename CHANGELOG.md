@@ -1,5 +1,129 @@
 # Changelog
 
+## [4.6.20] 2026-04-17
+
+### Google Search Console 연동 기능 구축
+
+#### 신규 기능 — GSC OAuth 연동 + 검색 키워드 데이터 조회
+
+**목적**: Google HTTPS 암호화로 인해 자체 수집 데이터에서 `(not provided)`로 표시되는 Google 유기검색 키워드를 Search Console API로 보완 — 클릭수, 노출수, CTR, 평균 순위 제공
+
+**신규 파일**
+
+| 파일 | 설명 |
+|------|------|
+| `supabase/functions/gsc-connect/index.ts` | OAuth 코드 교환 / site_url 업데이트 / 연동 해제 Edge Function (JWT OFF) |
+| `supabase/functions/gsc-data/index.ts` | GSC 검색 분석 데이터 조회 Edge Function (토큰 갱신 포함, JWT OFF) |
+| `src/views/admin/trafficSource/components/GscKeywordSection.jsx` | GSC 연동 상태 관리 + 키워드 테이블 컴포넌트 |
+
+**수정된 파일**
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `src/views/superadmin/default/index.jsx` | GSC 연동 UI (`GscKeywordSection`) 추가 — TrackingCodeManager 하단 |
+| `.env` | `REACT_APP_GOOGLE_CLIENT_ID` 추가 |
+| `.env.example` | Google OAuth 항목 템플릿 추가 |
+
+**GSC 연동 흐름**
+
+```
+슈퍼어드민 페이지 → [Google Search Console 연동] 버튼
+  → Google OAuth (webmasters.readonly scope, access_type=offline, prompt=consent)
+  → 리다이렉트 콜백 (?code=, ?state=advertiserId)
+  → gsc-connect Edge Function: 코드 교환 → tokens DB 저장 → sites 목록 반환
+  → 사이트 선택 (드롭다운 또는 수동 URL 입력)
+  → gsc-connect Edge Function: site_url 업데이트 (소문자 정규화)
+  → gsc-data Edge Function: 검색 분석 데이터 조회 (클릭수/노출수/CTR/순위)
+```
+
+**Supabase 변경사항**
+
+- `gsc_connections` 테이블 신규 생성 (advertiser_id UNIQUE, refresh_token, access_token, token_expiry, site_url)
+- Supabase Secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` 등록
+- Edge Function `gsc-connect` 배포 (JWT 검증 OFF)
+- Edge Function `gsc-data` 배포 (JWT 검증 OFF)
+
+**주요 구현 사항**
+
+- 브랜드별 GSC 연동 (advertiser_id 기준)
+- access_token 만료 1분 전 자동 갱신 (refresh_token 기반)
+- 날짜 미지정 시 연결 상태만 확인 (슈퍼어드민 페이지용)
+- site_url 소문자 정규화 (Google API가 대문자로 반환하는 문제 처리)
+- 연동 실패 시 `not_connected`로 폴백 (Edge Function 미배포 환경 대응)
+
+**GSC 데이터 주의사항**
+
+- GSC 데이터는 2~4일 딜레이 존재 — 오늘 유입된 키워드는 즉시 확인 불가
+- Google HTTPS 암호화로 자체 수집 데이터의 Google 키워드는 여전히 `(not provided)` — GSC 섹션에서 별도 확인
+
+---
+
+## [4.6.19] 2026-04-16
+
+### 마스터 전용 IP 필터 콘솔 구축 + zaService 전체 IP 필터 적용
+
+#### 신규 기능 — `/masteradmin/ip-filter` IP 필터 관리 콘솔
+
+**목적**: 내부 직원·관리자 IP를 등록해 해당 IP의 이벤트 데이터를 Analytics 집계에서 자동 제외
+
+**신규 파일**
+
+| 파일 | 설명 |
+|------|------|
+| `src/layouts/masteradmin/index.js` | master 전용 레이아웃 — 비master 접근 시 잠금 화면 표시 |
+| `src/masteradminRoutes.js` | 마스터어드민 라우트 정의 (홈으로 돌아가기 + IP 필터 관리) |
+| `src/views/masteradmin/ipFilter/index.jsx` | IP 차단 등록/해제 UI — 테이블, 추가 폼, "내 IP" 자동 조회 버튼 |
+| `supabase/ip_filter_migration.sql` | DB 마이그레이션 SQL (STEP 1~4: 상태 확인 → 테이블 생성 → RPC 업데이트 → 검증) |
+
+**수정된 파일**
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `src/App.js` | `MasterAdminLayout` 라우트 추가 (`/masteradmin/*`) |
+| `src/routes.js` | 마스터 콘솔 아이콘 사이드바 진입점 추가 (`showInSidebar: true`, `requiresPermission: 'master'`) |
+| `src/components/sidebar/AdminIconSidebar.js` | `role === 'master'` 권한 체크 로직 추가 |
+
+**접근 구조**: 좌측 아이콘 사이드바(AdminIconSidebar) → master 계정에만 방패 아이콘 노출 → `/masteradmin/ip-filter`
+
+---
+
+#### Supabase 변경사항
+
+- **`za_ip_blocklist` 테이블 신규 생성** (RLS 활성화, master 전용 정책)
+- **6개 RPC 함수에 `p_blocked_ips TEXT[] DEFAULT ARRAY[]::TEXT[]` 파라미터 추가**
+  - `get_hourly_visitors`, `get_hourly_pageviews`, `get_page_scroll_stats`
+  - `get_channel_performance`, `get_heatmap_page_list`, `get_scroll_heatmap`
+  - `ip_address::TEXT != ALL(...)` → **`host(ip_address) != ALL(...)`** 으로 수정
+  - 이유: `za_events.ip_address` 컬럼이 `inet` 타입 → DB 저장 시 `/32` suffix 자동 추가 (`175.x.x.x/32`) → `za_ip_blocklist`의 순수 IP 문자열과 불일치 → `host()` 함수로 서브넷 마스크 제거 후 비교
+  - 기존 호출 코드 하위 호환 유지 (파라미터 DEFAULT 값)
+
+---
+
+#### zaService.js — IP 필터 전체 함수 적용
+
+**추가된 인프라** (`src/views/admin/zestAnalytics/services/zaService.js`)
+- `_ipBlocklistCache` / `_ipBlocklistCacheAt` — 모듈 레벨 캐시 (TTL 60초)
+- `_getBlockedIpsCached()` — 캐시 히트 시 즉시 반환, 만료 시 Supabase `za_ip_blocklist` 재조회
+- `invalidateIpBlocklistCache()` — IP 추가/삭제 시 캐시 무효화
+- `_applyIpFilter(query, blockedIps)` — PostgREST 쿼리에 `.not('ip_address', 'in', ...)` 적용 (inet 정규화: `/32` 자동 append)
+- `getBlockedIps()`, `addBlockedIp()`, `removeBlockedIp()` — CRUD 함수
+
+**필터 적용 범위 확장 (`za_events` 쿼리 24개 전체)**
+
+초기 구현에서 analytics 전용 10개 함수에만 적용되어 메인 대시보드·유입경로 페이지에서는 차단 IP 데이터가 그대로 표시되는 문제 발견 및 수정.
+
+| 구분 | 함수 목록 |
+|------|-----------|
+| 기존 적용 (직접 쿼리) | `getEventStatistics`, `getAttributionStats`, `getCampaignPerformance`, `getRecentEvents` |
+| 기존 적용 (RPC) | `getHourlyVisitors`, `getHourlyPageViews`, `getPageScrollStats`, `getChannelPerformance`, `getHeatmapPageList`, `getScrollHeatmap` |
+| **신규 적용** (메인 대시보드) | `getDashboardKPIs`, `getDailyVisitorTrend`, `getDeviceStats`, `getVisitorTypeStats`, `getTopPages`, `getBehaviorRates`, `getTopActions`, `getTopReferrers`, `getOsStats`, `getBrowserStats` |
+| **신규 적용** (유입경로 분석) | `getReferrerBreakdown`, `getReferrerHourlyData`, `getNavigationPaths`, `getKeywordBreakdown` |
+| **신규 적용** (기타) | `getHeatmapPageStats`, `getDailyEventStats`, `getUTMBreakdown` |
+
+> `getClickHeatmap`, `getClickTopElements`는 `za_click_events` 테이블 사용 — 별도 처리 대상
+
+---
+
 ## [4.6.18] 2026-04-16
 
 ### 경로 탐색 — 단계 확장/접기 + 카드 클릭으로 펼치기 (`NavigationFlow.jsx`)

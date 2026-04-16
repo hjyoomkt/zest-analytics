@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import AuthLayout from './layouts/auth';
 import AdminLayout from './layouts/admin';
 import SuperAdminLayout from './layouts/superadmin';
+import MasterAdminLayout from './layouts/masteradmin';
 import ClientAdminLayout from './layouts/clientadmin';
 import {
   ChakraProvider,
@@ -67,6 +68,12 @@ export default function Main() {
                 path="superadmin/*"
                 element={
                   <SuperAdminLayout theme={currentTheme} setTheme={setCurrentTheme} />
+                }
+              />
+              <Route
+                path="masteradmin/*"
+                element={
+                  <MasterAdminLayout theme={currentTheme} setTheme={setCurrentTheme} />
                 }
               />
               <Route

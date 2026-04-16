@@ -6,7 +6,7 @@ import { useAuth } from 'contexts/AuthContext';
 export default function AdminIconSidebar(props) {
   const { routes } = props;
   const location = useLocation();
-  const { canAccessSuperAdmin, canAccessBrandAdmin } = useAuth();
+  const { canAccessSuperAdmin, canAccessBrandAdmin, role } = useAuth();
 
   // Filter routes for sidebar display
   // Include /admin layout routes and routes with showInSidebar flag
@@ -28,6 +28,9 @@ export default function AdminIconSidebar(props) {
     }
     if (route.requiresPermission === 'brandadmin') {
       return canAccessBrandAdmin && canAccessBrandAdmin();
+    }
+    if (route.requiresPermission === 'master') {
+      return role === 'master';
     }
 
     return true;
