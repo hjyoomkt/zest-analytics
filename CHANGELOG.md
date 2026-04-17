@@ -1,5 +1,93 @@
 # Changelog
 
+## [4.6.23] 2026-04-17
+
+### SDK 채널 감지 개선 — Click ID 우선 처리 및 플랫폼 확장
+
+#### 신규 기능
+
+**`src/views/admin/zestAnalytics/sdk/index.js`**
+
+- `_captureParams()`: 플랫폼 Click ID 감지 추가 → `_za_click_channel`로 localStorage 저장 (UTM보다 우선)
+  - `gclid` / `gad_source` / `gad_campaignid` → `google_ads`
+  - `fbclid` → `facebook`
+  - `ttclid` → `tiktok`
+  - `twclid` → `twitter`
+  - `n_media` / `NaPm` → `naver_ads`
+  - `tb_clickid` → `taboola`
+  - `cto_pld` → `criteo`
+- `_detectChannel()`: 저장된 `_za_click_channel` UTM 소스 판별보다 먼저 적용
+- `utm_source=meta` → `facebook` 매핑 추가
+- `utm_source=taboola`, `criteo`, `appier` 포함 시 각 채널 반환 추가
+- 카카오 자체 click ID 없음 주석 추가 (광고주에게 `utm_source=kakao` 설정 안내 필요)
+
+---
+
+## [4.6.22] 2026-04-17
+
+### SDK 빌드 구조 버그 수정 — index.js 미반영 문제 완전 해결
+
+#### 수정된 버그 (근본 원인)
+
+**진짜 원인**: CDN 캐시가 아니라 빌드 구조 문제
+- 빌드 명령: `node src/views/admin/zestAnalytics/sdk/build.js && react-scripts build`
+- `build.js`가 `src/.../sdk/index.js` → `public/sdk/za-sdk.js`로 덮어씀
+- 이전 커밋(`4ac09a6`)에서 `public/sdk/za-sdk.js`만 수정하고 **`index.js`를 수정하지 않아** Vercel 빌드 시마다 구버전으로 복원됨
+- CDN은 항상 Vercel 빌드 산출물(구버전 index.js 기반)을 서빙하고 있었음
+
+**수정 완료** (`a5f4d35` 커밋):
+
+**`src/views/admin/zestAnalytics/sdk/index.js`** ← 진짜 소스 파일
+
+- `trackPageView()`: `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content` 필드 추가
+- `_sendSessionEnd()`: 동일 UTM 필드 추가
+- `_getStoredUtmParams()`: 신규 헬퍼 메서드 추가 (localStorage UTM 조회 + 만료 체크)
+- `_detectChannel()`: 알 수 없는 `utm_source` → referrer 재판별 후 `'referral'` 반환 (`return source` 버그 제거)
+
+**`public/sdk/za-sdk.js`**: `build.js` 실행으로 동기화 (빌드 산출물, 직접 수정 금지)
+
+#### DB 확인
+
+- pageview / session_end 이벤트에 `utm_source`, `utm_medium`, `utm_campaign` 정상 저장 확인
+- `channel` 컬럼에 raw utm_source 값 대신 정제된 채널명 저장 확인
+
+---
+
+## [4.6.21] 2026-04-17
+
+### SDK 버그 수정 및 채널별 히트맵 개선 작업
+
+#### 수정된 버그
+
+**`public/sdk/za-sdk.js`**
+
+- `_detectChannel()` 개선: 알 수 없는 `utm_source` 값(예: `ogb`)을 채널 컬럼에 그대로 저장하던 문제 수정
+  - 알 수 없는 소스 → `document.referrer`로 플랫폼 재판별 (facebook, naver, google 등)
+  - referrer도 불명이면 `'referral'` 반환
+- `_getStoredUtmParams()` 헬퍼 메서드 분리 (localStorage UTM 조회 + 만료 체크 통합)
+- `trackPageView()` 페이로드에 `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content` 추가
+- `_sendSessionEnd()` 페이로드에 동일 UTM 필드 추가
+
+**`za-collect-event.ts`**
+
+- `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content` 저장 범위를 전환 이벤트 전용(`isConversion`) → **모든 이벤트**로 확장
+- 기존: pageview / session_end 이벤트에서 UTM 컬럼이 항상 `null`로 저장되던 문제 해결
+
+**`vercel.json` (신규)**
+
+- `/sdk/*.js` 경로에 `Cache-Control: no-cache, no-store, must-revalidate` 헤더 설정
+- Vercel CDN 캐시로 인해 SDK 업데이트가 즉시 반영되지 않던 문제 해결
+
+#### ⚠️ 해결 못함
+
+- **채널별 히트맵 — DB 채널 기반 필터링 미완료**
+  - 현재 채널별 히트맵은 여전히 `page_url`의 UTM 파라미터를 클라이언트에서 파싱하는 방식 유지
+  - 올바른 방법: `za_events.channel`, `utm_source`, `utm_medium`, `utm_campaign` 컬럼 기반 DB 필터링
+  - SDK/Edge Function 버그 수정 완료 후 신규 데이터 쌓이면 DB 필터 방식으로 전환 필요
+  - 필요 작업: `get_heatmap_channels` SQL 신규, `get_heatmap_page_list` / `get_scroll_heatmap` `p_channel` 파라미터 추가, zaService + HeatmapViewer 업데이트
+
+---
+
 ## [4.6.20] 2026-04-17
 
 ### Google Search Console 연동 기능 구축
