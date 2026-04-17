@@ -266,6 +266,23 @@
       const urlParams = new URLSearchParams(window.location.search);
       const params = {};
 
+      // 플랫폼 Click ID 감지 (UTM보다 신뢰도 높음 — 플랫폼이 자동 부착)
+      if (urlParams.get('gclid') || urlParams.get('gad_source') || urlParams.get('gad_campaignid')) {
+        params._za_click_channel = 'google_ads';
+      } else if (urlParams.get('fbclid')) {
+        params._za_click_channel = 'facebook';
+      } else if (urlParams.get('ttclid')) {
+        params._za_click_channel = 'tiktok';
+      } else if (urlParams.get('twclid')) {
+        params._za_click_channel = 'twitter';
+      } else if (urlParams.get('n_media') || urlParams.has('NaPm')) {
+        params._za_click_channel = 'naver_ads';
+      } else if (urlParams.get('tb_clickid')) {
+        params._za_click_channel = 'taboola';
+      } else if (urlParams.get('cto_pld')) {
+        params._za_click_channel = 'criteo';
+      }
+
       // za_* 파라미터 우선, 없으면 utm_* 사용
       const paramNames = ['source', 'medium', 'campaign', 'term', 'content'];
       paramNames.forEach((param) => {
@@ -283,7 +300,7 @@
       if (Object.keys(params).length > 0) {
         const stored = {
           ...params,
-          clicked_at: new Date().toISOString(), // 클릭 시점 저장
+          clicked_at: new Date().toISOString(),
         };
 
         try {
@@ -436,19 +453,26 @@
           const source = (params.utm_source || '').toLowerCase();
           const medium = (params.utm_medium || '').toLowerCase();
 
+          // Click ID 기반 채널 최우선 (utm_source보다 신뢰도 높음)
+          if (params._za_click_channel) return params._za_click_channel;
+
           if (medium === 'email') return 'email';
 
           if (source) {
             if (source.includes('google')) return (medium === 'cpc' || medium === 'ppc' || medium === 'paid') ? 'google_ads' : 'google';
             if (source.includes('naver')) return (medium === 'cpc' || medium === 'ppc') ? 'naver_ads' : 'naver';
+            // 카카오는 자체 click ID 없음 — utm_source=kakao 설정 필요
             if (source.includes('kakao')) return 'kakao';
             if (source.includes('instagram')) return 'instagram';
-            if (source.includes('facebook') || source.includes('fb')) return 'facebook';
+            if (source.includes('facebook') || source.includes('fb') || source.includes('meta')) return 'facebook';
             if (source.includes('youtube')) return 'youtube';
             if (source.includes('tiktok')) return 'tiktok';
-            if (source.includes('twitter') || source.includes('x')) return 'twitter';
+            if (source.includes('twitter') || source.includes('x.com')) return 'twitter';
             if (source.includes('bing')) return 'bing';
             if (source.includes('yahoo')) return 'yahoo';
+            if (source.includes('taboola')) return 'taboola';
+            if (source.includes('criteo')) return 'criteo';
+            if (source.includes('appier')) return 'appier';
             // 알 수 없는 소스 → referrer로 플랫폼 판별
             const r2 = (document.referrer || '').toLowerCase();
             if (r2.includes('facebook.com') || r2.includes('l.facebook.com')) return 'facebook';
