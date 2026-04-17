@@ -38,6 +38,5 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# 내부 문서
-로그인_기능_이식.md
-수퍼베이스_DB_세팅.md
+# 내부 문서 (전체 md 파일)
+*.md
