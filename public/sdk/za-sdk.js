@@ -63,6 +63,19 @@
         return;
       }
 
+      // localhost / 127.0.0.1 환경에서는 수집 비활성화
+      const hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+        console.log('[ZA] Localhost detected — tracking disabled.');
+        return;
+      }
+
+      // 히트맵 뷰어 iframe 미리보기 시 수집 비활성화
+      if (new URLSearchParams(window.location.search).get('za_preview') === '1') {
+        console.log('[ZA] Preview mode detected — tracking disabled.');
+        return;
+      }
+
       this.trackingId = trackingId;
       this.config = { ...this.config, ...options };
       this.isInitialized = true;
@@ -350,6 +363,28 @@
     }
 
     /**
+     * localStorage에 저장된 UTM 파라미터 반환 (만료 시 null)
+     * @private
+     */
+    _getStoredUtmParams() {
+      try {
+        const stored = localStorage.getItem('za_params');
+        if (!stored) return null;
+        const params = JSON.parse(stored);
+        if (params.clicked_at) {
+          const daysSince = (Date.now() - new Date(params.clicked_at)) / (1000 * 60 * 60 * 24);
+          if (daysSince > this.config.attributionWindow) {
+            localStorage.removeItem('za_params');
+            return null;
+          }
+        }
+        return params;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    /**
      * 디바이스 정보 수집
      * @private
      */
@@ -381,35 +416,23 @@
     }
 
     /**
-     * localStorage에 저장된 UTM 파라미터 반환 (만료 시 null)
-     * @private
-     */
-    _getStoredUtmParams() {
-      try {
-        const stored = localStorage.getItem('za_params');
-        if (!stored) return null;
-        const params = JSON.parse(stored);
-        if (params.clicked_at) {
-          const daysSince = (Date.now() - new Date(params.clicked_at)) / (1000 * 60 * 60 * 24);
-          if (daysSince > this.config.attributionWindow) {
-            localStorage.removeItem('za_params');
-            return null;
-          }
-        }
-        return params;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    /**
-     * 유입 채널 감지 (고수준 채널 카테고리 반환, utm_source 값을 그대로 반환하지 않음)
+     * 유입 채널 감지
      * @private
      */
     _detectChannel() {
       try {
-        const params = this._getStoredUtmParams();
-        if (params) {
+        // UTM/ZA 파라미터 우선 적용
+        const stored = localStorage.getItem('za_params');
+        if (stored) {
+          const params = JSON.parse(stored);
+          // 어트리뷰션 윈도우(28일) 초과 시 무시
+          if (params.clicked_at) {
+            const daysSince = (Date.now() - new Date(params.clicked_at)) / (1000 * 60 * 60 * 24);
+            if (daysSince > this.config.attributionWindow) {
+              localStorage.removeItem('za_params');
+              return !document.referrer ? 'direct' : 'referral';
+            }
+          }
           const source = (params.utm_source || '').toLowerCase();
           const medium = (params.utm_medium || '').toLowerCase();
 
