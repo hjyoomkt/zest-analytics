@@ -54,7 +54,7 @@ import {
 } from 'react-icons/md';
 import { FaFacebook, FaInstagram, FaYoutube, FaTwitter } from 'react-icons/fa';
 import Card from 'components/card/Card';
-import { getReferrerBreakdown } from 'views/admin/zestAnalytics/services/zaService';
+import { getReferrerBreakdown, analyticsCacheVersion } from 'views/admin/zestAnalytics/services/zaService';
 
 // ── localStorage 키 ──────────────────────────────────────────────────────────
 const STORAGE_KEY = 'traffic_source_visible_cols';
@@ -62,7 +62,7 @@ const STORAGE_KEY = 'traffic_source_visible_cols';
 // ── 모듈 레벨 캐시 ─────────────────────────────────────────────────────────
 const _cache = {};
 const _cacheKey = (advertiserId, startDate, endDate, attributionModel) =>
-  `ref_table|${advertiserId ?? 'all'}|${startDate}|${endDate}|${attributionModel}`;
+  `ref_table|${advertiserId ?? 'all'}|${startDate}|${endDate}|${attributionModel}|ip${analyticsCacheVersion.v}`;
 
 const ATTRIBUTION_OPTIONS = [
   { value: 'first_touch', label: '퍼스트터치' },

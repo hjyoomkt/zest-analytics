@@ -48,8 +48,10 @@
       this.accumulatedTime = 0;      // 누적 활성 시간 (초)
       this.lastInteractionTime = null;
       this.idleTimer = null;
-      this.IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
-      this.MIN_SESSION_DURATION = 3;       // 3초 미만 노이즈 필터
+      this.engagementPauseTimer = null;
+      this.IDLE_TIMEOUT = 30 * 60 * 1000;        // 30분 무활동 → 세션 완전 종료
+      this.ENGAGEMENT_IDLE = 2 * 60 * 1000;      // 2분 무활동 → 체류시간 집계 일시정지
+      this.MIN_SESSION_DURATION = 3;              // 3초 미만 노이즈 필터
     }
 
     /**
@@ -671,11 +673,26 @@
     }
 
     /**
-     * idle 타이머 리셋 (30분 무활동 시 세션 종료)
+     * 2분 무활동 → 체류시간 집계 일시정지 (세션은 유지)
+     * Date.now()가 아닌 lastInteractionTime 기준으로 잘라야 2분 대기 구간이 포함되지 않음
+     * @private
+     */
+    _pauseEngagement() {
+      if (this.activeStartTime !== null) {
+        const endTime = this.lastInteractionTime || this.activeStartTime;
+        this.accumulatedTime += Math.round((endTime - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+    }
+
+    /**
+     * idle 타이머 리셋 (2분 → 집계 중단, 30분 → 세션 종료)
      * @private
      */
     _resetIdleTimer() {
       if (this.idleTimer) clearTimeout(this.idleTimer);
+      if (this.engagementPauseTimer) clearTimeout(this.engagementPauseTimer);
+      this.engagementPauseTimer = setTimeout(() => this._pauseEngagement(), this.ENGAGEMENT_IDLE);
       this.idleTimer = setTimeout(() => this._onIdle(), this.IDLE_TIMEOUT);
     }
 
@@ -685,7 +702,10 @@
      */
     _onIdle() {
       if (this.activeStartTime !== null) {
-        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        // idle 타이머 발동 시점(Date.now())이 아닌 마지막 실제 상호작용 시점까지만 집계
+        // Date.now()를 쓰면 무활동 30분이 고스란히 체류시간에 합산되는 버그 발생
+        const endTime = this.lastInteractionTime || this.activeStartTime;
+        this.accumulatedTime += Math.round((endTime - this.activeStartTime) / 1000);
         this.activeStartTime = null;
       }
       this._sendSessionEnd();
@@ -702,6 +722,7 @@
         this.activeStartTime = null;
       }
       if (this.idleTimer) clearTimeout(this.idleTimer);
+      if (this.engagementPauseTimer) clearTimeout(this.engagementPauseTimer);
     }
 
     /**
@@ -763,12 +784,14 @@
      */
     _resetSession() {
       try { sessionStorage.removeItem('za_sid'); } catch (e) {}
+      if (this.engagementPauseTimer) clearTimeout(this.engagementPauseTimer);
       this.sessionId = this._getOrCreateSessionId();
       this.accumulatedTime = 0;
       this.activeStartTime = null;
       this.maxScrollDepth = 0;
       this.scrollBuckets = new Array(10).fill(0);
       this.idleTimer = null;
+      this.engagementPauseTimer = null;
     }
 
     /**

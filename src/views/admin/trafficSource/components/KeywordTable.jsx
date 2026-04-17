@@ -44,7 +44,7 @@ import {
   MdInfoOutline,
 } from 'react-icons/md';
 import Card from 'components/card/Card';
-import { getKeywordBreakdown } from 'views/admin/zestAnalytics/services/zaService';
+import { getKeywordBreakdown, analyticsCacheVersion } from 'views/admin/zestAnalytics/services/zaService';
 
 // ── localStorage 키 ──────────────────────────────────────────────────────────
 const STORAGE_KEY = 'keyword_table_visible_cols';
@@ -52,7 +52,7 @@ const STORAGE_KEY = 'keyword_table_visible_cols';
 // ── 모듈 레벨 캐시 ───────────────────────────────────────────────────────────
 const _cache = {};
 const _cacheKey = (advertiserId, startDate, endDate) =>
-  `keyword|${advertiserId ?? 'all'}|${startDate}|${endDate}`;
+  `keyword|${advertiserId ?? 'all'}|${startDate}|${endDate}|ip${analyticsCacheVersion.v}`;
 
 // ============================================================================
 // 검색엔진 스타일 설정

@@ -220,16 +220,21 @@ const _getBlockedIpsCached = async () => {
   return _ipBlocklistCache;
 };
 
+// IP 변경 시 컴포넌트 캐시 일괄 무효화용 버전 카운터
+export const analyticsCacheVersion = { v: 0 };
+
 export const invalidateIpBlocklistCache = () => {
   _ipBlocklistCache = null;
   _ipBlocklistCacheAt = 0;
+  analyticsCacheVersion.v++;
 };
 
 const _applyIpFilter = (query, blockedIps) => {
   if (blockedIps && blockedIps.length > 0) {
-    // inet 타입은 /32 형태로 저장되므로 CIDR 형식으로 정규화
-    const normalized = blockedIps.map((ip) => (ip.includes('/') ? ip : `${ip}/32`));
-    return query.not('ip_address', 'in', `(${normalized.join(',')})`);
+    // inet 컬럼을 text로 캐스팅 후 비교 (PostgREST에서 inet 타입 직접 IN 비교 시 타입 불일치 발생)
+    // inet::text는 '1.2.3.4/32' 형태이므로 비교값도 /32 붙여 정규화
+    const withCidr = blockedIps.map((ip) => (ip.includes('/') ? ip : `${ip}/32`));
+    return query.not('ip_address::text', 'in', `(${withCidr.join(',')})`);
   }
   return query;
 };

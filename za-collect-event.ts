@@ -6,6 +6,26 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+// 검색엔진/크롤러/스크레이퍼 UA 패턴 — 수집 데이터 오염 방지
+const BOT_UA_PATTERNS = [
+  /bot/i, /crawler/i, /spider/i, /crawling/i, /scraper/i,
+  /Googlebot/i, /AdsBot-Google/i, /Google-InspectionTool/i, /Googlebot-Image/i, /Googlebot-Video/i,
+  /Yeti/i, /NaverBot/i, /Daumoa/i,
+  /bingbot/i, /MicrosoftPreview/i,
+  /YandexBot/i,
+  /AhrefsBot/i, /SemrushBot/i, /MJ12bot/i, /DotBot/i, /Majestic/i,
+  /facebookexternalhit/i, /Twitterbot/i, /LinkedInBot/i, /Slackbot/i, /Applebot/i,
+  /Python-urllib/i, /python-requests/i,
+  /curl\//i, /wget\//i,
+  /HeadlessChrome/i, /PhantomJS/i,
+  /imweb/i, /cafe24/i,
+];
+
+const isBot = (ua: string | null): boolean => {
+  if (!ua) return false;
+  return BOT_UA_PATTERNS.some((p) => p.test(ua));
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -14,6 +34,14 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // 크롤러/봇 UA는 200으로 조용히 무시 (재시도 유발 방지)
+  if (isBot(req.headers.get('user-agent'))) {
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -65,7 +93,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || req.headers.get('x-real-ip') || null;
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || null;
+    const userAgent = req.headers.get('user-agent') || null;
 
     // 클릭 이벤트 → za_click_events
     if (payload.event_type === 'click') {
@@ -131,6 +160,7 @@ Deno.serve(async (req) => {
       browser: !isSessionEnd ? payload.browser : null,
       os: !isSessionEnd ? payload.os : null,
       ip_address: ip,
+      user_agent: userAgent,
       custom_data: payload.custom_data || {},
     });
 

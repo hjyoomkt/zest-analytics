@@ -28,7 +28,7 @@ import {
 import { MdKeyboardArrowDown } from 'react-icons/md';
 import ReactApexChart from 'react-apexcharts';
 import Card from 'components/card/Card';
-import { getReferrerHourlyData } from 'views/admin/zestAnalytics/services/zaService';
+import { getReferrerHourlyData, analyticsCacheVersion } from 'views/admin/zestAnalytics/services/zaService';
 
 // ── 지표 목록 ─────────────────────────────────────────────────────────────────
 const METRICS = [
@@ -54,7 +54,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')
 // ── 모듈 레벨 캐시 ────────────────────────────────────────────────────────────
 const _cache = {};
 const _cacheKey = (advertiserId, startDate, endDate) =>
-  `ref_hourly|${advertiserId ?? 'all'}|${startDate}|${endDate}`;
+  `ref_hourly|${advertiserId ?? 'all'}|${startDate}|${endDate}|ip${analyticsCacheVersion.v}`;
 
 // ── 값 포맷 ───────────────────────────────────────────────────────────────────
 const fmtValue = (val, format) => {

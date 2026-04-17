@@ -31,7 +31,7 @@ import {
   MdKeyboardArrowRight,
 } from 'react-icons/md';
 import Card from 'components/card/Card';
-import { getNavigationPaths } from 'views/admin/zestAnalytics/services/zaService';
+import { getNavigationPaths, analyticsCacheVersion } from 'views/admin/zestAnalytics/services/zaService';
 
 // ── 설정 ─────────────────────────────────────────────────────────────────────
 
@@ -136,7 +136,7 @@ function computeStepData(allSessions, selectedPath, mode, maxSteps) {
 // ── 모듈 레벨 캐시 ─────────────────────────────────────────────────────────────
 
 const _cache = {};
-const _cacheKey = (aId, ids, s, e) => `nav|${aId ?? 'all'}|${ids.join(',')}|${s}|${e}`;
+const _cacheKey = (aId, ids, s, e) => `nav|${aId ?? 'all'}|${ids.join(',')}|${s}|${e}|ip${analyticsCacheVersion.v}`;
 
 // ── 하위 컴포넌트 ──────────────────────────────────────────────────────────────
 
