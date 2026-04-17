@@ -22,6 +22,7 @@ import {
   getHeatmapPageStats,
   getClickHeatmap,
   getClickTopElements,
+  getHeatmapChannels,
 } from '../services/zaService';
 
 // COLD(파랑) → HOT(빨강) 그라디언트 색상 계산 (0~1)
@@ -50,37 +51,25 @@ const DATE_PRESETS = [
   { label: '최근 30일', start: () => getKSTDaysAgo(29),end: () => getKSTToday() },
 ];
 
-// ── UTM 파라미터 파싱 ──────────────────────────────────────────────────────────
-
-/** URL에서 UTM 파라미터를 파싱. utm_source 없으면 'direct' */
-function parseUtm(url) {
-  try {
-    const base = url.includes('://') ? url : `https://x.com${url}`;
-    const u = new URL(base);
-    return {
-      source:   u.searchParams.get('utm_source')   || 'direct',
-      medium:   u.searchParams.get('utm_medium')   || null,
-      campaign: u.searchParams.get('utm_campaign') || null,
-    };
-  } catch {
-    return { source: 'direct', medium: null, campaign: null };
-  }
-}
-
-/** source 이름을 사람이 읽기 좋게 표시 */
-function sourceLabel(source) {
+/** DB channel 값 → 사람이 읽기 좋은 표시 */
+function channelLabel(channel) {
   const map = {
-    google: 'Google',
-    naver: '네이버',
-    facebook: 'Meta(FB)',
-    instagram: 'Meta(IG)',
-    kakao: '카카오',
-    youtube: 'YouTube',
-    twitter: 'X(트위터)',
-    tiktok: 'TikTok',
-    direct: '직접유입',
+    direct:     '직접유입',
+    google:     '구글',
+    google_ads: '구글 광고',
+    naver:      '네이버',
+    naver_ads:  '네이버 광고',
+    facebook:   'Meta',
+    instagram:  'Instagram',
+    kakao:      '카카오',
+    referral:   '추천링크',
+    tiktok:     'TikTok',
+    twitter:    'Twitter/X',
+    taboola:    'Taboola',
+    criteo:     'Criteo',
+    appier:     'Appier',
   };
-  return map[source?.toLowerCase()] || source || '직접유입';
+  return map[channel] || channel || '기타';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -122,9 +111,10 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
   const [loadingData, setLoadingData]   = useState(false);
 
   // ── 채널 분리 필터 상태 ────────────────────────────────────────────
-  const [filterSource,   setFilterSource]   = useState('all');
-  const [filterMedium,   setFilterMedium]   = useState('all');
-  const [filterCampaign, setFilterCampaign] = useState('all');
+  const [filterChannel, setFilterChannel]       = useState('all');
+  const [channels, setChannels]                 = useState([]);
+  const [channelPageList, setChannelPageList]   = useState([]);
+  const [loadingChannelPages, setLoadingChannelPages] = useState(false);
   const [pageListSort, setPageListSort] = useState({ key: 'session_count', dir: 'desc' });
   const [channelSelectedPage, setChannelSelectedPage] = useState('');
   const [channelHeatmapData, setChannelHeatmapData]   = useState(null);
@@ -179,70 +169,56 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
     return item?.raw_urls?.length ? item.raw_urls : (selectedPage ? [selectedPage] : []);
   }, [pageList, selectedPage]);
 
-  // ── 채널 필터 옵션 계산 ────────────────────────────────────────────
+  // ── 채널 목록 로드 ────────────────────────────────────────────────
+  const loadChannels = useCallback(async () => {
+    if (!startDate || !endDate) return;
+    try {
+      const list = await getHeatmapChannels({ advertiserId, availableAdvertiserIds, startDate, endDate, deviceType });
+      setChannels(list);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [advertiserId, availableAdvertiserIds, startDate, endDate, deviceType]);
 
-  /** 전체 pageList raw_urls에서 source 목록 추출 */
-  const allSources = useMemo(() => {
-    const set = new Set();
-    pageList.forEach((p) => (p.raw_urls || []).forEach((url) => set.add(parseUtm(url).source)));
-    return Array.from(set).sort((a, b) => {
-      if (a === 'direct') return 1;
-      if (b === 'direct') return -1;
-      return a.localeCompare(b);
-    });
-  }, [pageList]);
-
-  /** 선택한 source 기준 medium 목록 */
-  const availableMediums = useMemo(() => {
-    const set = new Set();
-    pageList.forEach((p) =>
-      (p.raw_urls || []).forEach((url) => {
-        const { source, medium } = parseUtm(url);
-        if (filterSource !== 'all' && source !== filterSource) return;
-        if (medium) set.add(medium);
-      })
-    );
-    return Array.from(set).sort();
-  }, [pageList, filterSource]);
-
-  /** 선택한 source+medium 기준 campaign 목록 */
-  const availableCampaigns = useMemo(() => {
-    const set = new Set();
-    pageList.forEach((p) =>
-      (p.raw_urls || []).forEach((url) => {
-        const { source, medium, campaign } = parseUtm(url);
-        if (filterSource !== 'all' && source !== filterSource) return;
-        if (filterMedium !== 'all' && medium !== filterMedium) return;
-        if (campaign) set.add(campaign);
-      })
-    );
-    return Array.from(set).sort();
-  }, [pageList, filterSource, filterMedium]);
-
-  /** 현재 채널 필터에 매칭되는 pageList (raw_urls도 필터링) */
-  const channelFilteredPageList = useMemo(() => {
-    return pageList
-      .map((p) => {
-        const filteredRawUrls = (p.raw_urls || []).filter((url) => {
-          const { source, medium, campaign } = parseUtm(url);
-          if (filterSource !== 'all' && source !== filterSource) return false;
-          if (filterMedium !== 'all' && medium !== filterMedium) return false;
-          if (filterCampaign !== 'all' && campaign !== filterCampaign) return false;
-          return true;
+  // ── 채널별 페이지 목록 로드 ───────────────────────────────────────
+  const loadChannelPageList = useCallback(async () => {
+    if (!startDate || !endDate) return;
+    setLoadingChannelPages(true);
+    try {
+      const list = await getHeatmapPageList({
+        advertiserId,
+        availableAdvertiserIds,
+        startDate,
+        endDate,
+        deviceType,
+        channel: filterChannel === 'all' ? null : filterChannel,
+      });
+      setChannelPageList(list);
+      if (list.length > 0) {
+        setChannelSelectedPage((prev) => {
+          const stillExists = list.some((p) => p.page_url === prev);
+          return stillExists ? prev : list[0].page_url;
         });
-        return { ...p, raw_urls: filteredRawUrls };
-      })
-      .filter((p) => p.raw_urls.length > 0);
-  }, [pageList, filterSource, filterMedium, filterCampaign]);
+      } else {
+        setChannelSelectedPage('');
+      }
+      setChannelHeatmapData(null);
+      setChannelPageStats(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingChannelPages(false);
+    }
+  }, [advertiserId, availableAdvertiserIds, startDate, endDate, deviceType, filterChannel]);
 
   /** 정렬 적용된 페이지 목록 */
   const sortedPageList = useMemo(() => {
-    return [...channelFilteredPageList].sort((a, b) => {
+    return [...channelPageList].sort((a, b) => {
       const aVal = pageListSort.key === 'session_count' ? a.session_count : a.avg_depth;
       const bVal = pageListSort.key === 'session_count' ? b.session_count : b.avg_depth;
       return pageListSort.dir === 'desc' ? bVal - aVal : aVal - bVal;
     });
-  }, [channelFilteredPageList, pageListSort]);
+  }, [channelPageList, pageListSort]);
 
   const toggleSort = (key) => {
     setPageListSort((prev) =>
@@ -254,7 +230,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
 
   /** 채널 분리 히트맵용 iframe URL */
   const channelIframeUrl = useMemo(() => {
-    const page = channelFilteredPageList.find((p) => p.page_url === channelSelectedPage);
+    const page = channelPageList.find((p) => p.page_url === channelSelectedPage);
     const rawUrl = page?.raw_urls?.[0];
     if (!rawUrl) return 'about:blank';
     try {
@@ -264,31 +240,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
     } catch {
       return rawUrl;
     }
-  }, [channelFilteredPageList, channelSelectedPage]);
-
-  // ── 필터 변경 시 medium/campaign 리셋 ────────────────────────────
-  useEffect(() => {
-    setFilterMedium('all');
-    setFilterCampaign('all');
-  }, [filterSource]);
-
-  useEffect(() => {
-    setFilterCampaign('all');
-  }, [filterMedium]);
-
-  // ── 필터 변경 시 선택 페이지 리셋 → 첫 번째 자동 선택 ────────────
-  useEffect(() => {
-    if (channelFilteredPageList.length > 0) {
-      setChannelSelectedPage((prev) => {
-        const stillExists = channelFilteredPageList.some((p) => p.page_url === prev);
-        return stillExists ? prev : channelFilteredPageList[0].page_url;
-      });
-    } else {
-      setChannelSelectedPage('');
-    }
-    setChannelHeatmapData(null);
-    setChannelPageStats(null);
-  }, [channelFilteredPageList]);
+  }, [channelPageList, channelSelectedPage]);
 
   // ── 스크롤 히트맵 로드 ────────────────────────────────────────────
   const loadHeatmapData = useCallback(async () => {
@@ -311,14 +263,15 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
   // ── 채널 분리 스크롤 히트맵 로드 ─────────────────────────────────
   const loadChannelData = useCallback(async () => {
     if (!channelSelectedPage || !startDate || !endDate) return;
-    const page = channelFilteredPageList.find((p) => p.page_url === channelSelectedPage);
+    const page = channelPageList.find((p) => p.page_url === channelSelectedPage);
     const rawUrls = page?.raw_urls;
     if (!rawUrls?.length) return;
 
     setLoadingChannelData(true);
     try {
+      const ch = filterChannel === 'all' ? null : filterChannel;
       const [hm, stats] = await Promise.all([
-        getScrollHeatmap({ advertiserId, availableAdvertiserIds, pageUrls: rawUrls, startDate, endDate, deviceType }),
+        getScrollHeatmap({ advertiserId, availableAdvertiserIds, pageUrls: rawUrls, startDate, endDate, deviceType, channel: ch }),
         getHeatmapPageStats({ advertiserId, availableAdvertiserIds, pageUrls: rawUrls, startDate, endDate, deviceType }),
       ]);
       setChannelHeatmapData(hm);
@@ -328,7 +281,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
     } finally {
       setLoadingChannelData(false);
     }
-  }, [advertiserId, availableAdvertiserIds, channelSelectedPage, channelFilteredPageList, startDate, endDate, deviceType]);
+  }, [advertiserId, availableAdvertiserIds, channelSelectedPage, channelPageList, filterChannel, startDate, endDate, deviceType]);
 
   // ── 클릭 히트맵 로드 ──────────────────────────────────────────────
   const loadClickData = useCallback(async () => {
@@ -350,6 +303,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
 
   useEffect(() => { loadPageList(); }, [loadPageList]);
   useEffect(() => { if (selectedPage) loadHeatmapData(); }, [loadHeatmapData]);
+  useEffect(() => { if (heatmapMode === 'scroll_channel') { loadChannels(); loadChannelPageList(); } }, [heatmapMode, loadChannels, loadChannelPageList]);
   useEffect(() => { if (channelSelectedPage && heatmapMode === 'scroll_channel') loadChannelData(); }, [loadChannelData, channelSelectedPage, heatmapMode]);
   useEffect(() => { if (selectedPage && heatmapMode === 'click') loadClickData(); }, [loadClickData, heatmapMode, selectedPage]);
 
@@ -419,12 +373,8 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
 
   // ── 현재 채널 필터 레이블 (헤더 표시용) ───────────────────────────
   const activeFilterLabel = useMemo(() => {
-    const parts = [];
-    if (filterSource !== 'all') parts.push(sourceLabel(filterSource));
-    if (filterMedium !== 'all') parts.push(filterMedium);
-    if (filterCampaign !== 'all') parts.push(filterCampaign);
-    return parts.length > 0 ? parts.join(' · ') : '전체 채널';
-  }, [filterSource, filterMedium, filterCampaign]);
+    return filterChannel === 'all' ? '전체 채널' : channelLabel(filterChannel);
+  }, [filterChannel]);
 
   // ─────────────────────────────────────────────────────────────────
   // JSX
@@ -611,96 +561,33 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
               </Flex>
             </Flex>
 
-            {/* ── Step 1: 채널 필터 (source → medium → campaign) ── */}
-            <Box>
-              {/* source 행 */}
-              <Flex align="center" gap="8px" mb="8px" flexWrap="wrap">
-                <Text fontSize="11px" fontWeight="700" color={subTextColor} w="60px" flexShrink={0}>채널</Text>
-                <Flex gap="6px" flexWrap="wrap">
+            {/* ── Step 1: 채널 필터 ── */}
+            <Flex align="center" gap="8px" flexWrap="wrap">
+              <Text fontSize="11px" fontWeight="700" color={subTextColor} w="60px" flexShrink={0}>채널</Text>
+              <Flex gap="6px" flexWrap="wrap">
+                <FilterChip
+                  label="전체"
+                  active={filterChannel === 'all'}
+                  onClick={() => setFilterChannel('all')}
+                  cardBg={cardBg}
+                  borderColor={borderColor}
+                  textColor={textColor}
+                  bgColor={bgColor}
+                />
+                {channels.map(({ channel, session_count }) => (
                   <FilterChip
-                    label="전체"
-                    active={filterSource === 'all'}
-                    onClick={() => setFilterSource('all')}
+                    key={channel}
+                    label={`${channelLabel(channel)} (${session_count})`}
+                    active={filterChannel === channel}
+                    onClick={() => setFilterChannel(channel)}
                     cardBg={cardBg}
                     borderColor={borderColor}
                     textColor={textColor}
                     bgColor={bgColor}
                   />
-                  {allSources.map((src) => (
-                    <FilterChip
-                      key={src}
-                      label={sourceLabel(src)}
-                      active={filterSource === src}
-                      onClick={() => setFilterSource(src)}
-                      cardBg={cardBg}
-                      borderColor={borderColor}
-                      textColor={textColor}
-                      bgColor={bgColor}
-                    />
-                  ))}
-                </Flex>
+                ))}
               </Flex>
-
-              {/* medium 행 (선택한 source에 medium이 있을 때) */}
-              {availableMediums.length > 0 && (
-                <Flex align="center" gap="8px" mb="8px" flexWrap="wrap">
-                  <Text fontSize="11px" fontWeight="700" color={subTextColor} w="60px" flexShrink={0}>매체</Text>
-                  <Flex gap="6px" flexWrap="wrap">
-                    <FilterChip
-                      label="전체"
-                      active={filterMedium === 'all'}
-                      onClick={() => setFilterMedium('all')}
-                      cardBg={cardBg}
-                      borderColor={borderColor}
-                      textColor={textColor}
-                      bgColor={bgColor}
-                    />
-                    {availableMediums.map((med) => (
-                      <FilterChip
-                        key={med}
-                        label={med}
-                        active={filterMedium === med}
-                        onClick={() => setFilterMedium(med)}
-                        cardBg={cardBg}
-                        borderColor={borderColor}
-                        textColor={textColor}
-                        bgColor={bgColor}
-                      />
-                    ))}
-                  </Flex>
-                </Flex>
-              )}
-
-              {/* campaign 행 (campaign이 있을 때) */}
-              {availableCampaigns.length > 0 && (
-                <Flex align="center" gap="8px" flexWrap="wrap">
-                  <Text fontSize="11px" fontWeight="700" color={subTextColor} w="60px" flexShrink={0}>캠페인</Text>
-                  <Flex gap="6px" flexWrap="wrap">
-                    <FilterChip
-                      label="전체"
-                      active={filterCampaign === 'all'}
-                      onClick={() => setFilterCampaign('all')}
-                      cardBg={cardBg}
-                      borderColor={borderColor}
-                      textColor={textColor}
-                      bgColor={bgColor}
-                    />
-                    {availableCampaigns.map((camp) => (
-                      <FilterChip
-                        key={camp}
-                        label={camp}
-                        active={filterCampaign === camp}
-                        onClick={() => setFilterCampaign(camp)}
-                        cardBg={cardBg}
-                        borderColor={borderColor}
-                        textColor={textColor}
-                        bgColor={bgColor}
-                      />
-                    ))}
-                  </Flex>
-                </Flex>
-              )}
-            </Box>
+            </Flex>
           </Box>
 
           {/* ── Step 2: 필터된 페이지 목록 ── */}
@@ -709,17 +596,17 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
               <Flex align="center" gap="8px">
                 <Text fontSize="14px" fontWeight="700" color={textColor}>방문 페이지</Text>
                 <Badge colorScheme="brand" borderRadius="full" px="8px" fontSize="11px">
-                  {channelFilteredPageList.length}개
+                  {channelPageList.length}개
                 </Badge>
               </Flex>
               <Text fontSize="12px" color={subTextColor}>{activeFilterLabel}</Text>
             </Flex>
 
-            {loadingPages ? (
+            {loadingChannelPages ? (
               <Flex direction="column" gap="1px">
                 {Array(4).fill(0).map((_, i) => <Skeleton key={i} h="52px" borderRadius="0" />)}
               </Flex>
-            ) : channelFilteredPageList.length === 0 ? (
+            ) : channelPageList.length === 0 ? (
               <Flex align="center" justify="center" h="120px" direction="column" gap="6px">
                 <Text fontSize="13px" color={subTextColor}>해당 채널로 유입된 페이지 데이터가 없습니다</Text>
                 <Text fontSize="11px" color={subTextColor}>필터 조건을 변경해보세요</Text>
@@ -848,7 +735,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
             <Flex gap="20px" align="flex-start" wrap={{ base: 'wrap', xl: 'nowrap' }}>
               <ScrollHeatmapPanel
                 selectedPage={channelSelectedPage}
-                selectedRawUrls={channelFilteredPageList.find((p) => p.page_url === channelSelectedPage)?.raw_urls || []}
+                selectedRawUrls={channelPageList.find((p) => p.page_url === channelSelectedPage)?.raw_urls || []}
                 iframeUrl={channelIframeUrl}
                 heatmapData={channelHeatmapData}
                 loadingData={loadingChannelData}
@@ -874,7 +761,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
               />
             </Flex>
           ) : (
-            !loadingPages && channelFilteredPageList.length > 0 && (
+            !loadingChannelPages && channelPageList.length > 0 && (
               <Flex
                 align="center"
                 justify="center"

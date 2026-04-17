@@ -714,12 +714,44 @@ export const getChannelPerformance = async ({
  *   page_url : 정규화된 URL (드롭다운 표시용)
  *   raw_urls : 해당 정규화 URL에 속하는 원본 URL 배열 (데이터 조회용)
  */
+/**
+ * 채널별 세션 수 목록
+ */
+export const getHeatmapChannels = async ({
+  advertiserId,
+  availableAdvertiserIds,
+  startDate,
+  endDate,
+  deviceType = null,
+}) => {
+  try {
+    const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
+    if (ids.length === 0) return [];
+
+    const blockedIps = await _getBlockedIpsCached();
+    const { data, error } = await supabase.rpc('get_heatmap_channels', {
+      p_advertiser_ids: ids,
+      p_start: `${startDate}T00:00:00+09:00`,
+      p_end: `${endDate}T23:59:59+09:00`,
+      p_device_type: deviceType,
+      p_blocked_ips: blockedIps,
+    });
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('[ZA Service] getHeatmapChannels error:', error);
+    throw error;
+  }
+};
+
 export const getHeatmapPageList = async ({
   advertiserId,
   availableAdvertiserIds,
   startDate,
   endDate,
   deviceType = null,
+  channel = null,
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
@@ -732,6 +764,7 @@ export const getHeatmapPageList = async ({
       p_end: `${endDate}T23:59:59+09:00`,
       p_device_type: deviceType,
       p_blocked_ips: blockedIps,
+      p_channel: channel,
     });
 
     if (error) throw error;
@@ -783,6 +816,7 @@ export const getScrollHeatmap = async ({
   startDate,
   endDate,
   deviceType = null,
+  channel = null,
 }) => {
   try {
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
@@ -807,6 +841,7 @@ export const getScrollHeatmap = async ({
           p_end: `${endDate}T23:59:59+09:00`,
           p_device_type: deviceType,
           p_blocked_ips: blockedIps,
+          p_channel: channel,
         })
       )
     );
