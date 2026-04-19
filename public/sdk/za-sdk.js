@@ -755,9 +755,9 @@
         device_type: deviceInfo.device_type,
       });
 
-      // sendBeacon: 페이지 이탈 시에도 전송 보장 (iOS 인앱 브라우저 포함)
+      // sendBeacon: text/plain으로 전송해 CORS preflight 우회 (Deno req.json()은 content-type 무관하게 파싱)
       if (navigator.sendBeacon) {
-        navigator.sendBeacon(API_ENDPOINT, new Blob([body], { type: 'application/json' }));
+        navigator.sendBeacon(API_ENDPOINT, body);
       } else {
         fetch(API_ENDPOINT, {
           method: 'POST',
