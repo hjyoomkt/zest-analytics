@@ -43,8 +43,16 @@ ORDER BY p.proname;
 
 
 -- ============================================================
--- STEP 2. za_ip_blocklist 테이블 생성 (없을 때만 실행)
+-- STEP 2. za_ip_blocklist 테이블 생성 + is_bot 컬럼 추가
 -- ============================================================
+
+-- [2-0] za_events 에 is_bot 컬럼 추가 (user_agent 기반 자동 계산)
+ALTER TABLE za_events
+  ADD COLUMN IF NOT EXISTS is_bot BOOLEAN GENERATED ALWAYS AS (
+    user_agent ~* '(bot|crawl|spider|slurp|Ads-Naver|AdsBot|HeadlessChrome|PhantomJS|Selenium|facebookexternalhit|Twitterbot|LinkedInBot|Kakaotalk|DaumApps|Yeti|NaverBot)'
+  ) STORED;
+
+
 
 CREATE TABLE IF NOT EXISTS za_ip_blocklist (
   id          UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -102,7 +110,8 @@ AS $$
     AND session_id    IS NOT NULL
     AND created_at   >= p_start
     AND created_at   <  p_end
-    AND (cardinality(p_blocked_ips) = 0 OR ip_address::TEXT != ALL(p_blocked_ips))
+    AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(is_bot, false)
   GROUP BY 1
   ORDER BY 1;
 $$;
@@ -125,7 +134,8 @@ AS $$
     AND event_type    = 'pageview'
     AND created_at   >= p_start
     AND created_at   <  p_end
-    AND (cardinality(p_blocked_ips) = 0 OR ip_address::TEXT != ALL(p_blocked_ips))
+    AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(is_bot, false)
   GROUP BY 1
   ORDER BY 1;
 $$;
@@ -163,7 +173,8 @@ AS $$
     AND page_url      IS NOT NULL
     AND created_at   >= p_start
     AND created_at   <  p_end
-    AND (cardinality(p_blocked_ips) = 0 OR ip_address::TEXT != ALL(p_blocked_ips))
+    AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(is_bot, false)
   GROUP BY page_url
   ORDER BY total_sessions DESC;
 $$;
@@ -198,7 +209,8 @@ AS $$
       AND event_type    = 'pageview'
       AND created_at   >= p_start
       AND created_at   <  p_end
-      AND (cardinality(p_blocked_ips) = 0 OR ip_address::TEXT != ALL(p_blocked_ips))
+      AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+      AND NOT COALESCE(is_bot, false)
     GROUP BY 1, 2
   ),
   se AS (
@@ -212,7 +224,8 @@ AS $$
       AND event_type    = 'session_end'
       AND created_at   >= p_start
       AND created_at   <  p_end
-      AND (cardinality(p_blocked_ips) = 0 OR ip_address::TEXT != ALL(p_blocked_ips))
+      AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+      AND NOT COALESCE(is_bot, false)
   )
   SELECT
     pv.channel,
@@ -261,7 +274,8 @@ AS $$
     AND created_at   >= p_start
     AND created_at   <  p_end
     AND (p_device_type IS NULL OR device_type = p_device_type)
-    AND (cardinality(p_blocked_ips) = 0 OR ip_address::TEXT != ALL(p_blocked_ips))
+    AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(is_bot, false)
   GROUP BY page_url
   ORDER BY session_count DESC;
 $$;
@@ -295,7 +309,8 @@ AS $$
     AND created_at   >= p_start
     AND created_at   <  p_end
     AND (p_device_type IS NULL OR device_type = p_device_type)
-    AND (cardinality(p_blocked_ips) = 0 OR ip_address::TEXT != ALL(p_blocked_ips))
+    AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(is_bot, false)
   GROUP BY b
   ORDER BY b;
 $$;

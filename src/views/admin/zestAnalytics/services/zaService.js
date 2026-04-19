@@ -230,6 +230,7 @@ export const invalidateIpBlocklistCache = () => {
 };
 
 const _applyIpFilter = (query, blockedIps) => {
+  query = query.not('is_bot', 'is', true);
   if (blockedIps && blockedIps.length > 0) {
     // inet 컬럼을 text로 캐스팅 후 비교 (PostgREST에서 inet 타입 직접 IN 비교 시 타입 불일치 발생)
     // inet::text는 '1.2.3.4/32' 형태이므로 비교값도 /32 붙여 정규화

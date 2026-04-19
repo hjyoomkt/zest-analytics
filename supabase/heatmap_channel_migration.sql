@@ -24,6 +24,7 @@ AS $$
     AND e.created_at   <  p_end
     AND (p_device_type IS NULL OR e.device_type = p_device_type)
     AND (cardinality(p_blocked_ips) = 0 OR host(e.ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(e.is_bot, false)
   GROUP BY COALESCE(e.channel, 'direct')
   ORDER BY session_count DESC;
 $$;
@@ -57,6 +58,7 @@ AS $$
     AND created_at   <  p_end
     AND (p_device_type IS NULL OR device_type = p_device_type)
     AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(is_bot, false)
     AND (p_channel IS NULL OR COALESCE(channel, 'direct') = p_channel)
   GROUP BY page_url
   ORDER BY session_count DESC;
@@ -93,6 +95,7 @@ AS $$
     AND created_at   <  p_end
     AND (p_device_type IS NULL OR device_type = p_device_type)
     AND (cardinality(p_blocked_ips) = 0 OR host(ip_address) != ALL(p_blocked_ips))
+    AND NOT COALESCE(is_bot, false)
     AND (p_channel IS NULL OR COALESCE(channel, 'direct') = p_channel)
   GROUP BY b
   ORDER BY b;
