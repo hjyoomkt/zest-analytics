@@ -738,27 +738,34 @@
 
       const deviceInfo = this._getDeviceInfo();
       const utmParams = this._getStoredUtmParams();
-      fetch(API_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tracking_id: this.trackingId,
-          event_type: 'session_end',
-          session_id: this.sessionId,
-          time_on_page: this.accumulatedTime,
-          page_url: window.location.href,
-          scroll_depth: this.maxScrollDepth,
-          scroll_buckets: this.scrollBuckets,
-          channel: this._detectChannel(),
-          utm_source:   utmParams?.utm_source   || null,
-          utm_medium:   utmParams?.utm_medium   || null,
-          utm_campaign: utmParams?.utm_campaign || null,
-          utm_term:     utmParams?.utm_term     || null,
-          utm_content:  utmParams?.utm_content  || null,
-          device_type: deviceInfo.device_type,
-        }),
-        keepalive: true,
-      }).catch(() => {});
+      const body = JSON.stringify({
+        tracking_id: this.trackingId,
+        event_type: 'session_end',
+        session_id: this.sessionId,
+        time_on_page: this.accumulatedTime,
+        page_url: window.location.href,
+        scroll_depth: this.maxScrollDepth,
+        scroll_buckets: this.scrollBuckets,
+        channel: this._detectChannel(),
+        utm_source:   utmParams?.utm_source   || null,
+        utm_medium:   utmParams?.utm_medium   || null,
+        utm_campaign: utmParams?.utm_campaign || null,
+        utm_term:     utmParams?.utm_term     || null,
+        utm_content:  utmParams?.utm_content  || null,
+        device_type: deviceInfo.device_type,
+      });
+
+      // sendBeacon: 페이지 이탈 시에도 전송 보장 (iOS 인앱 브라우저 포함)
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(API_ENDPOINT, new Blob([body], { type: 'application/json' }));
+      } else {
+        fetch(API_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      }
     }
 
     /**

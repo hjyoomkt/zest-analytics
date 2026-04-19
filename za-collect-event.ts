@@ -10,7 +10,8 @@ const corsHeaders = {
 const BOT_UA_PATTERNS = [
   /bot/i, /crawler/i, /spider/i, /crawling/i, /scraper/i,
   /Googlebot/i, /AdsBot-Google/i, /Google-InspectionTool/i, /Googlebot-Image/i, /Googlebot-Video/i,
-  /Yeti/i, /NaverBot/i, /Daumoa/i,
+  /GoogleOther/i,
+  /Yeti/i, /NaverBot/i, /Daumoa/i, /Ads-Naver/i,
   /bingbot/i, /MicrosoftPreview/i,
   /YandexBot/i,
   /AhrefsBot/i, /SemrushBot/i, /MJ12bot/i, /DotBot/i, /Majestic/i,
@@ -40,6 +41,15 @@ Deno.serve(async (req) => {
 
   // 크롤러/봇 UA는 200으로 조용히 무시 (재시도 유발 방지)
   if (isBot(req.headers.get('user-agent'))) {
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // 해외 IP 무시 — KR 전용 서비스 (CF-IPCountry 헤더 활용)
+  const country = req.headers.get('cf-ipcountry');
+  if (country && country !== 'KR') {
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
