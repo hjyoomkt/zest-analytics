@@ -34,6 +34,7 @@ import {
   Spinner,
   Icon,
   Badge,
+  Tooltip,
   useColorModeValue,
   useDisclosure,
   useToast,
@@ -48,6 +49,7 @@ import {
   MdEmail,
   MdLink,
   MdKeyboardArrowDown,
+  MdOutlineInfo,
 } from 'react-icons/md';
 import { FaFacebook, FaInstagram, FaYoutube, FaTwitter } from 'react-icons/fa';
 import Card from 'components/card/Card';
@@ -116,8 +118,8 @@ const METRIC_COLUMNS = [
   { key: 'users',                 label: '사용자수',      format: 'number',   defaultOn: true  },
   { key: 'pageviews',             label: '페이지뷰수',    format: 'number',   defaultOn: true  },
   { key: 'avgPageviewsPerUser',   label: '평균 페이지뷰', format: 'decimal',  defaultOn: false },
-  { key: 'avgTimeOnPage',         label: '평균 체류시간', format: 'duration', defaultOn: true  },
-  { key: 'avgScrollDepth',        label: '평균 도달률',   format: 'percent',  defaultOn: false },
+  { key: 'avgTimeOnPage',         label: '평균 체류시간', format: 'duration', defaultOn: true,  sessionEnd: true },
+  { key: 'avgScrollDepth',        label: '평균 도달률',   format: 'percent',  defaultOn: false, sessionEnd: true },
   { key: 'purchases',             label: '구매',          format: 'number',   defaultOn: true  },
   { key: 'revenue',               label: '구매전환액수',  format: 'currency', defaultOn: true  },
   { key: 'purchaseConversionRate',label: '구매전환율',    format: 'rate',     defaultOn: false },
@@ -593,6 +595,13 @@ export default function ChannelAnalytics({
                   >
                     <Flex align="center" justify="flex-end" gap={1}>
                       {col.label}
+                      {col.sessionEnd && (
+                        <Tooltip label="session_end 발화 기준 데이터 — 탭 닫기/이탈 시 전송되며 마지막 페이지 이탈 누락 가능" fontSize="xs" placement="top" hasArrow>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }} onClick={(e) => e.stopPropagation()}>
+                            <Icon as={MdOutlineInfo} boxSize="13px" color="gray.400" />
+                          </span>
+                        </Tooltip>
+                      )}
                       <SortIcon colKey={col.key} sortKey={sortKey} sortDir={sortDir} />
                     </Flex>
                   </Th>

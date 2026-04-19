@@ -139,6 +139,7 @@ export default function MainDashboard() {
           }
           name='평균 체류시간'
           value={loading ? '...' : formatTime(kpi.avgTimeOnSite)}
+          sessionEndTooltip
         />
         <MiniStatistics
           startContent={
@@ -148,6 +149,7 @@ export default function MainDashboard() {
           }
           name='평균 스크롤 깊이'
           value={loading ? '...' : `${kpi.avgScrollDepth}%`}
+          sessionEndTooltip
         />
         <MiniStatistics
           startContent={

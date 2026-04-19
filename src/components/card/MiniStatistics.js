@@ -7,14 +7,17 @@ import {
   StatNumber,
   useColorModeValue,
   Text,
+  Tooltip,
+  Icon,
 } from "@chakra-ui/react";
 // Custom components
 import Card from "components/card/Card.js";
 // Custom icons
 import React from "react";
+import { MdInfoOutline } from "react-icons/md";
 
 export default function Default(props) {
-  const { startContent, endContent, name, growth, value } = props;
+  const { startContent, endContent, name, growth, value, sessionEndTooltip } = props;
   const textColor = useColorModeValue("secondaryGray.900", "white");
   const textColorSecondary = "secondaryGray.600";
 
@@ -34,7 +37,16 @@ export default function Default(props) {
             fontSize={{
               base: "sm",
             }}>
-            {name}
+            <Flex align="center" gap="4px">
+              {name}
+              {sessionEndTooltip && (
+                <Tooltip label="session_end 발화 기준 데이터 — 탭 닫기/이탈 시 전송되며 마지막 페이지 이탈 누락 가능" fontSize="xs" placement="top" hasArrow>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}>
+                    <Icon as={MdInfoOutline} w="13px" h="13px" color="gray.400" />
+                  </span>
+                </Tooltip>
+              )}
+            </Flex>
           </StatLabel>
           <StatNumber
             color={textColor}

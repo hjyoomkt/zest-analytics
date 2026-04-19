@@ -111,8 +111,8 @@ const METRIC_COLUMNS = [
   { key: 'avgOrderValue',          label: '평균 주문 금액',   format: 'currency', defaultOn: true  },
   // zest-analytics 추가 지표
   { key: 'pageviews',              label: '페이지뷰수',       format: 'number',   defaultOn: false },
-  { key: 'avgTimeOnPage',          label: '평균 체류시간',    format: 'duration', defaultOn: false },
-  { key: 'avgScrollDepth',         label: '평균 도달률',      format: 'percent',  defaultOn: false },
+  { key: 'avgTimeOnPage',          label: '평균 체류시간',    format: 'duration', defaultOn: false, sessionEnd: true },
+  { key: 'avgScrollDepth',         label: '평균 도달률',      format: 'percent',  defaultOn: false, sessionEnd: true },
   { key: 'addToCarts',             label: '장바구니담기',     format: 'number',   defaultOn: false },
   { key: 'leads',                  label: '리드',             format: 'number',   defaultOn: false },
 ];
@@ -658,6 +658,13 @@ export default function ReferrerTable({
                   >
                     <Flex align="center" justify="flex-end" gap={1}>
                       {col.label}
+                      {col.sessionEnd && (
+                        <Tooltip label="session_end 발화 기준 데이터 — 탭 닫기/이탈 시 전송되며 마지막 페이지 이탈 누락 가능" fontSize="xs" placement="top" hasArrow>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }} onClick={(e) => e.stopPropagation()}>
+                            <Icon as={MdOutlineInfo} boxSize="13px" color="gray.400" />
+                          </span>
+                        </Tooltip>
+                      )}
                       <SortIcon colKey={col.key} sortKey={sortKey} sortDir={sortDir} />
                     </Flex>
                   </Th>

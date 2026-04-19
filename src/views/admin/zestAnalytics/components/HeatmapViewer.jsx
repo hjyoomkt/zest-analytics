@@ -13,8 +13,9 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import {
   Box, Flex, Text, Select, Button, ButtonGroup,
-  SimpleGrid, Skeleton, useColorModeValue, Badge, Input, Tag,
+  SimpleGrid, Skeleton, useColorModeValue, Badge, Input, Tag, Tooltip, Icon,
 } from '@chakra-ui/react';
+import { MdInfoOutline } from 'react-icons/md';
 import { getKSTToday, getKSTDaysAgo } from 'utils/dateUtils';
 import {
   getHeatmapPageList,
@@ -1035,13 +1036,22 @@ function ScrollStatsPanel({
     <Box w={{ base: '100%', xl: '320px' }} flexShrink={0}>
       <SimpleGrid columns={2} spacing="12px" mb="12px">
         {[
-          { label: '방문자', value: loading ? null : (pageStats?.visitors ?? '-') },
-          { label: '페이지뷰', value: loading ? null : (pageStats?.pageviews ?? '-') },
-          { label: '평균 도달률', value: loading ? null : (pageStats ? `${pageStats.avgScrollDepth}%` : '-') },
-          { label: '세션 수', value: loading ? null : (pageStats?.totalSessions ?? '-') },
-        ].map(({ label: lbl, value }) => (
+          { label: '방문자', value: loading ? null : (pageStats?.visitors ?? '-'), sessionEnd: false },
+          { label: '페이지뷰', value: loading ? null : (pageStats?.pageviews ?? '-'), sessionEnd: false },
+          { label: '평균 도달률', value: loading ? null : (pageStats ? `${pageStats.avgScrollDepth}%` : '-'), sessionEnd: true },
+          { label: '세션 수', value: loading ? null : (pageStats?.totalSessions ?? '-'), sessionEnd: true },
+        ].map(({ label: lbl, value, sessionEnd }) => (
           <Box key={lbl} bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px">
-            <Text fontSize="12px" color={subTextColor} mb="4px">{lbl}</Text>
+            <Flex align="center" gap="4px" mb="4px">
+              <Text fontSize="12px" color={subTextColor}>{lbl}</Text>
+              {sessionEnd && (
+                <Tooltip label="session_end 발화 기준 데이터 — 탭 닫기/이탈 시 전송되며 마지막 페이지 이탈 누락 가능" fontSize="xs" placement="top" hasArrow>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}>
+                    <Icon as={MdInfoOutline} boxSize="12px" color="gray.400" />
+                  </span>
+                </Tooltip>
+              )}
+            </Flex>
             {value === null ? <Skeleton h="28px" borderRadius="6px" /> : <Text fontSize="24px" fontWeight="700" color={textColor}>{value}</Text>}
           </Box>
         ))}
