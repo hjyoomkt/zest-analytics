@@ -48,10 +48,8 @@
       this.accumulatedTime = 0;      // 누적 활성 시간 (초)
       this.lastInteractionTime = null;
       this.idleTimer = null;
-      this.engagementPauseTimer = null;
-      this.IDLE_TIMEOUT = 30 * 60 * 1000;        // 30분 무활동 → 세션 완전 종료
-      this.ENGAGEMENT_IDLE = 2 * 60 * 1000;      // 2분 무활동 → 체류시간 집계 일시정지
-      this.MIN_SESSION_DURATION = 3;              // 3초 미만 노이즈 필터
+      this.IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
+      this.MIN_SESSION_DURATION = 3;       // 3초 미만 노이즈 필터
     }
 
     /**
@@ -673,26 +671,11 @@
     }
 
     /**
-     * 2분 무활동 → 체류시간 집계 일시정지 (세션은 유지)
-     * Date.now()가 아닌 lastInteractionTime 기준으로 잘라야 2분 대기 구간이 포함되지 않음
-     * @private
-     */
-    _pauseEngagement() {
-      if (this.activeStartTime !== null) {
-        const endTime = this.lastInteractionTime || this.activeStartTime;
-        this.accumulatedTime += Math.round((endTime - this.activeStartTime) / 1000);
-        this.activeStartTime = null;
-      }
-    }
-
-    /**
-     * idle 타이머 리셋 (2분 → 집계 중단, 30분 → 세션 종료)
+     * idle 타이머 리셋 (30분 무활동 시 세션 종료)
      * @private
      */
     _resetIdleTimer() {
       if (this.idleTimer) clearTimeout(this.idleTimer);
-      if (this.engagementPauseTimer) clearTimeout(this.engagementPauseTimer);
-      this.engagementPauseTimer = setTimeout(() => this._pauseEngagement(), this.ENGAGEMENT_IDLE);
       this.idleTimer = setTimeout(() => this._onIdle(), this.IDLE_TIMEOUT);
     }
 
@@ -702,10 +685,7 @@
      */
     _onIdle() {
       if (this.activeStartTime !== null) {
-        // idle 타이머 발동 시점(Date.now())이 아닌 마지막 실제 상호작용 시점까지만 집계
-        // Date.now()를 쓰면 무활동 30분이 고스란히 체류시간에 합산되는 버그 발생
-        const endTime = this.lastInteractionTime || this.activeStartTime;
-        this.accumulatedTime += Math.round((endTime - this.activeStartTime) / 1000);
+        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
         this.activeStartTime = null;
       }
       this._sendSessionEnd();
@@ -713,7 +693,7 @@
     }
 
     /**
-     * 탭 숨김 → 활성 시간 누적 일시정지
+     * 탭 숨김 → 활성 시간 누적 + session_end 전송 (모바일 대비)
      * @private
      */
     _pauseSession() {
@@ -722,14 +702,17 @@
         this.activeStartTime = null;
       }
       if (this.idleTimer) clearTimeout(this.idleTimer);
-      if (this.engagementPauseTimer) clearTimeout(this.engagementPauseTimer);
+      // 모바일에서 beforeunload가 발화하지 않는 경우 대비
+      this._sendSessionEnd();
     }
 
     /**
-     * 탭 복귀 → 활성 구간 재시작
+     * 탭 복귀 → 세션 리셋 후 재시작
      * @private
      */
     _resumeSession() {
+      // 탭 복귀 시 새 세션으로 시작 (이전 session_end 이미 전송됨)
+      this._resetSession();
       this.activeStartTime = Date.now();
       this._resetIdleTimer();
     }
@@ -784,14 +767,12 @@
      */
     _resetSession() {
       try { sessionStorage.removeItem('za_sid'); } catch (e) {}
-      if (this.engagementPauseTimer) clearTimeout(this.engagementPauseTimer);
       this.sessionId = this._getOrCreateSessionId();
       this.accumulatedTime = 0;
       this.activeStartTime = null;
       this.maxScrollDepth = 0;
       this.scrollBuckets = new Array(10).fill(0);
       this.idleTimer = null;
-      this.engagementPauseTimer = null;
     }
 
     /**

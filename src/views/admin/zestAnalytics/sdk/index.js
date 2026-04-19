@@ -693,7 +693,7 @@
     }
 
     /**
-     * 탭 숨김 → 활성 시간 누적 일시정지
+     * 탭 숨김 → 활성 시간 누적 + session_end 전송 (모바일 대비)
      * @private
      */
     _pauseSession() {
@@ -702,13 +702,17 @@
         this.activeStartTime = null;
       }
       if (this.idleTimer) clearTimeout(this.idleTimer);
+      // 모바일에서 beforeunload가 발화하지 않는 경우 대비
+      this._sendSessionEnd();
     }
 
     /**
-     * 탭 복귀 → 활성 구간 재시작
+     * 탭 복귀 → 세션 리셋 후 재시작
      * @private
      */
     _resumeSession() {
+      // 탭 복귀 시 새 세션으로 시작 (이전 session_end 이미 전송됨)
+      this._resetSession();
       this.activeStartTime = Date.now();
       this._resetIdleTimer();
     }
