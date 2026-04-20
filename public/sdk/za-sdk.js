@@ -47,6 +47,7 @@
       this.activeStartTime = null;   // 현재 활성 구간 시작 시각
       this.accumulatedTime = 0;      // 누적 활성 시간 (초)
       this.pausedAt = null;          // 탭 숨김 시각 (복귀 시 경과 시간 계산용)
+      this._sameOriginNav = false;   // 같은 사이트 링크 클릭 여부 (내부 이동 감지)
       this.lastInteractionTime = null;
       this.idleTimer = null;
       this.IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
@@ -111,7 +112,8 @@
       // window.addEventListener('click', (e) => this._trackClick(e), { passive: true });
       // ───────────────────────────────────────────────────────────────────
 
-      // GA 스타일 세션 추적
+      // GA 스타일 세션 추적 (이전 페이지에서 이어진 시간 복원)
+      this._loadCarryTime();
       this.activeStartTime = Date.now();
       this.lastInteractionTime = Date.now();
 
@@ -122,6 +124,19 @@
 
       // idle 타이머 시작
       this._resetIdleTimer();
+
+      // 같은 사이트 링크 클릭 감지 (내부 이동 vs 진짜 이탈 구분)
+      document.addEventListener('click', (e) => {
+        const a = e.target.closest('a[href]');
+        if (a) {
+          try {
+            const url = new URL(a.href, window.location.href);
+            if (url.hostname === window.location.hostname) {
+              this._sameOriginNav = true;
+            }
+          } catch (_) {}
+        }
+      }, true);
 
       // 탭 전환 처리
       document.addEventListener('visibilitychange', () => {
@@ -726,7 +741,7 @@
     }
 
     /**
-     * 실제 페이지 이탈 → 세션 종료
+     * 실제 페이지 이탈 → 같은 사이트 이동이면 시간 이월, 진짜 이탈이면 session_end 전송
      * @private
      */
     _endSession() {
@@ -734,7 +749,37 @@
         this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
         this.activeStartTime = null;
       }
-      this._sendSessionEnd();
+      if (this._sameOriginNav) {
+        // 같은 사이트 내 페이지 이동 → 시간을 다음 페이지로 이월
+        this._saveCarryTime();
+        this._sameOriginNav = false;
+      } else {
+        // 진짜 이탈 (탭 닫기, 외부 사이트 이동)
+        this._sendSessionEnd();
+      }
+    }
+
+    _saveCarryTime() {
+      try {
+        sessionStorage.setItem('za_carry', JSON.stringify({
+          accumulatedTime: this.accumulatedTime,
+          sessionId: this.sessionId,
+          maxScrollDepth: this.maxScrollDepth,
+          scrollBuckets: this.scrollBuckets,
+        }));
+      } catch (_) {}
+    }
+
+    _loadCarryTime() {
+      try {
+        const raw = sessionStorage.getItem('za_carry');
+        if (!raw) return;
+        sessionStorage.removeItem('za_carry');
+        const carry = JSON.parse(raw);
+        if (carry.sessionId === this.sessionId) {
+          this.accumulatedTime = carry.accumulatedTime || 0;
+        }
+      } catch (_) {}
     }
 
     /**
