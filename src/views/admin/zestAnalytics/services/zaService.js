@@ -1150,14 +1150,24 @@ export const getDashboardKPIs = async ({
     // 방문자당 페이지뷰 = 전체 페이지뷰 / 고유 방문자
     const pagesPerVisit = uniqueVisitors > 0 ? parseFloat((pageviews / uniqueVisitors).toFixed(2)) : 0;
 
-    const sessionsWithTime = seRows.filter(r => r.time_on_page != null);
+    // session_id 기준으로 먼저 집계 (같은 세션에 session_end 여러 개 대응)
+    const sessionAggMap = {};
+    seRows.forEach(r => {
+      if (!r.session_id) return;
+      if (!sessionAggMap[r.session_id]) sessionAggMap[r.session_id] = { time: 0, scroll: 0 };
+      sessionAggMap[r.session_id].time += r.time_on_page || 0;
+      sessionAggMap[r.session_id].scroll = Math.max(sessionAggMap[r.session_id].scroll, r.scroll_depth || 0);
+    });
+    const aggSessions = Object.values(sessionAggMap);
+
+    const sessionsWithTime = aggSessions.filter(r => r.time > 0);
     const avgTimeOnSite = sessionsWithTime.length > 0
-      ? Math.round(sessionsWithTime.reduce((s, r) => s + r.time_on_page, 0) / sessionsWithTime.length)
+      ? Math.round(sessionsWithTime.reduce((s, r) => s + r.time, 0) / sessionsWithTime.length)
       : 0;
 
-    const sessionsWithScroll = seRows.filter(r => r.scroll_depth != null);
+    const sessionsWithScroll = aggSessions.filter(r => r.scroll > 0);
     const avgScrollDepth = sessionsWithScroll.length > 0
-      ? Math.round(sessionsWithScroll.reduce((s, r) => s + r.scroll_depth, 0) / sessionsWithScroll.length)
+      ? Math.round(sessionsWithScroll.reduce((s, r) => s + r.scroll, 0) / sessionsWithScroll.length)
       : 0;
 
     // 신규/재방문: session_end 우선, 없으면 pageview에서 visitor 기준으로 집계
@@ -1898,20 +1908,22 @@ export const getUTMBreakdown = async ({
       if (event.event_type === 'lead')        g.leads++;
     });
 
-    // Pass 2: session_end 이벤트로 체류시간/스크롤 집계
+    // Pass 2: session_end 이벤트로 체류시간/스크롤 집계 (session_id 기준 먼저 합산)
+    const seAggMap = {};
     sessionEndEvents.forEach((event) => {
-      if (!event.time_on_page || event.time_on_page <= 0) return;
-
-      const key =
-        sessionGroupMap[event.session_id] ||
-        [event.channel || 'direct', '-', '-', '-'].join('|');
-
+      if (!event.session_id) return;
+      const key = sessionGroupMap[event.session_id] || [event.channel || 'direct', '-', '-', '-'].join('|');
+      if (!seAggMap[event.session_id]) seAggMap[event.session_id] = { key, time: 0, scroll: 0 };
+      seAggMap[event.session_id].time += event.time_on_page || 0;
+      seAggMap[event.session_id].scroll = Math.max(seAggMap[event.session_id].scroll, event.scroll_depth || 0);
+    });
+    Object.values(seAggMap).forEach(({ key, time, scroll }) => {
+      if (time <= 0) return;
       const g = groups[key];
       if (!g) return;
-
-      g.totalTimeOnPage += event.time_on_page;
+      g.totalTimeOnPage += time;
       g.sessionEndCount++;
-      g.totalScrollDepth += event.scroll_depth || 0;
+      g.totalScrollDepth += scroll;
     });
 
     // 최종 결과 배열 변환 및 정렬
@@ -2051,19 +2063,26 @@ export const getReferrerBreakdown = async ({
         }
       });
 
-    // Pass 2: session_end → 체류시간/스크롤
+    // Pass 2: session_end → 체류시간/스크롤 (session_id 기준 먼저 합산)
+    const refSeAggMap = {};
     rows
       .filter((e) => e.event_type === 'session_end')
       .forEach((event) => {
+        if (!event.session_id) return;
         const ref = sessionRefMap[event.session_id];
         if (!ref || !groups[ref]) return;
-        const g = groups[ref];
-        if (event.time_on_page && event.time_on_page > 0) {
-          g.totalTimeOnPage += event.time_on_page;
-          g.sessionEndCount++;
-          g.totalScrollDepth += event.scroll_depth || 0;
-        }
+        if (!refSeAggMap[event.session_id]) refSeAggMap[event.session_id] = { ref, time: 0, scroll: 0 };
+        refSeAggMap[event.session_id].time += event.time_on_page || 0;
+        refSeAggMap[event.session_id].scroll = Math.max(refSeAggMap[event.session_id].scroll, event.scroll_depth || 0);
       });
+    Object.values(refSeAggMap).forEach(({ ref, time, scroll }) => {
+      if (time <= 0) return;
+      const g = groups[ref];
+      if (!g) return;
+      g.totalTimeOnPage += time;
+      g.sessionEndCount++;
+      g.totalScrollDepth += scroll;
+    });
 
     // Pass 3: 전환 이벤트 → 세션 referrer 귀속
     rows

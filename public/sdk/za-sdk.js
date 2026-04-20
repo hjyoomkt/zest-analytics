@@ -688,8 +688,12 @@
     _onInteraction() {
       this.lastInteractionTime = Date.now();
       if (this.activeStartTime === null) {
-        // idle 상태에서 복귀 → 활성 구간 재시작
-        this.activeStartTime = Date.now();
+        if (this.pausedAt !== null) {
+          // visibilitychange/pageshow 미발화 시 첫 터치·스크롤로 복귀 감지
+          this._resumeSession();
+        } else {
+          this.activeStartTime = Date.now();
+        }
       }
       this._resetIdleTimer();
     }
@@ -812,6 +816,7 @@
         tracking_id: this.trackingId,
         event_type: 'session_end',
         session_id: this.sessionId,
+        visitor_id: this.visitorId,
         time_on_page: timeOnPage,
         page_url: window.location.href,
         scroll_depth: this.maxScrollDepth,
