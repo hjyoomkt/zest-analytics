@@ -753,6 +753,7 @@
         // 같은 사이트 내 페이지 이동 → 시간을 다음 페이지로 이월
         this._saveCarryTime();
         this._sameOriginNav = false;
+        this.accumulatedTime = 0; // pagehide 후 beforeunload 중복 전송 차단
       } else {
         // 진짜 이탈 (탭 닫기, 외부 사이트 이동)
         this._sendSessionEnd();
