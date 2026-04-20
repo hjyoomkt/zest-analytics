@@ -736,13 +736,16 @@
     _sendSessionEnd() {
       if (!this.trackingId || this.accumulatedTime < this.MIN_SESSION_DURATION) return;
 
+      const timeOnPage = this.accumulatedTime;
+      this.accumulatedTime = 0;
+
       const deviceInfo = this._getDeviceInfo();
       const utmParams = this._getStoredUtmParams();
       const body = JSON.stringify({
         tracking_id: this.trackingId,
         event_type: 'session_end',
         session_id: this.sessionId,
-        time_on_page: this.accumulatedTime,
+        time_on_page: timeOnPage,
         page_url: window.location.href,
         scroll_depth: this.maxScrollDepth,
         scroll_buckets: this.scrollBuckets,
