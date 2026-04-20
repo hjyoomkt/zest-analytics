@@ -720,6 +720,11 @@
       }
       if (this.idleTimer) clearTimeout(this.idleTimer);
       this.pausedAt = Date.now();
+      // 내부 이동이 아닐 때만 session_end 전송 (모바일 앱/탭 닫기 대응)
+      // visibilitychange에서 전송해야 iOS에서 sendBeacon 성공률이 높음
+      if (!this._sameOriginNav) {
+        this._sendSessionEnd();
+      }
     }
 
     /**
