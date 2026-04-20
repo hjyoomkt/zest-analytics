@@ -46,6 +46,7 @@
       // GA 스타일 세션 추적
       this.activeStartTime = null;   // 현재 활성 구간 시작 시각
       this.accumulatedTime = 0;      // 누적 활성 시간 (초)
+      this.pausedAt = null;          // 탭 숨김 시각 (복귀 시 경과 시간 계산용)
       this.lastInteractionTime = null;
       this.idleTimer = null;
       this.IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
@@ -131,7 +132,8 @@
         }
       });
 
-      // 실제 이탈
+      // 실제 이탈 (pagehide: iOS Safari 대응, beforeunload: 데스크탑)
+      window.addEventListener('pagehide', () => this._endSession());
       window.addEventListener('beforeunload', () => this._endSession());
 
       // 대기열 처리
@@ -702,18 +704,24 @@
         this.activeStartTime = null;
       }
       if (this.idleTimer) clearTimeout(this.idleTimer);
-      // 모바일에서 beforeunload가 발화하지 않는 경우 대비
-      this._sendSessionEnd();
+      this.pausedAt = Date.now();
     }
 
     /**
-     * 탭 복귀 → 세션 리셋 후 재시작
+     * 탭 복귀 → 30분 이내면 세션 재개, 초과면 이전 세션 종료 후 새 세션
      * @private
      */
     _resumeSession() {
-      // 탭 복귀 시 새 세션으로 시작 (이전 session_end 이미 전송됨)
-      this._resetSession();
-      this.activeStartTime = Date.now();
+      const now = Date.now();
+      const away = this.pausedAt ? (now - this.pausedAt) : 0;
+      this.pausedAt = null;
+
+      if (away >= this.IDLE_TIMEOUT) {
+        // 30분 이상 자리 비움 → 이전 세션 종료 후 새 세션
+        this._sendSessionEnd();
+        this._resetSession();
+      }
+      this.activeStartTime = now;
       this._resetIdleTimer();
     }
 
