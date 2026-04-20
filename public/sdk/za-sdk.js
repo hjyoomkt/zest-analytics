@@ -147,6 +147,13 @@
         }
       });
 
+      // iOS bfcache 복귀 시 visibilitychange:visible 미발화 대응
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted && this.pausedAt !== null) {
+          this._resumeSession();
+        }
+      });
+
       // 실제 이탈 (pagehide: iOS Safari 대응, beforeunload: 데스크탑)
       window.addEventListener('pagehide', () => this._endSession());
       window.addEventListener('beforeunload', () => this._endSession());
@@ -732,6 +739,7 @@
      * @private
      */
     _resumeSession() {
+      if (this.activeStartTime !== null) return; // pageshow + visibilitychange 동시 발화 방지
       const now = Date.now();
       const away = this.pausedAt ? (now - this.pausedAt) : 0;
       this.pausedAt = null;
