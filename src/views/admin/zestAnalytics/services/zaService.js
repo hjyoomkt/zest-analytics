@@ -926,7 +926,7 @@ export const getHeatmapPageStats = async ({
     // 스크롤 통계 (session_end)
     let seQuery = supabase
       .from('za_events')
-      .select('scroll_depth')
+      .select('session_id, scroll_depth')
       .in('advertiser_id', ids)
       .eq('event_type', 'session_end')
       .in('page_url', urls)
@@ -942,7 +942,14 @@ export const getHeatmapPageStats = async ({
     if (seResult.error) throw seResult.error;
 
     const pvData = pvResult.data || [];
-    const seData = seResult.data || [];
+
+    // session_id 기준 scroll_depth MAX 집계
+    const seScrollMap = {};
+    (seResult.data || []).forEach(r => {
+      if (!r.session_id) return;
+      seScrollMap[r.session_id] = Math.max(seScrollMap[r.session_id] ?? 0, r.scroll_depth || 0);
+    });
+    const seData = Object.values(seScrollMap).map(scroll_depth => ({ scroll_depth }));
 
     const uniqueVisitors = new Set(pvData.map((r) => r.visitor_id).filter(Boolean)).size;
     const avgDepth =
@@ -1332,7 +1339,7 @@ export const getVisitorTypeStats = async ({
 
     let seQuery = supabase
       .from('za_events')
-      .select('is_new_visitor')
+      .select('visitor_id, session_id, is_new_visitor')
       .in('advertiser_id', ids)
       .eq('event_type', 'session_end')
       .gte('created_at', startTs)
@@ -1347,9 +1354,16 @@ export const getVisitorTypeStats = async ({
 
     // session_end에 is_new_visitor 없으면 pageview에서 fallback
     if (rows.length > 0 && rows.some(r => r.is_new_visitor != null)) {
+      // visitor_id 기준 중복제거 (같은 visitor의 session_end 여러 개 대응)
+      const visitorNewMap = {};
+      rows.forEach(r => {
+        if (r.visitor_id && r.is_new_visitor != null && !(r.visitor_id in visitorNewMap)) {
+          visitorNewMap[r.visitor_id] = isNewFn(r.is_new_visitor);
+        }
+      });
       return {
-        newVisitors: rows.filter(r => isNewFn(r.is_new_visitor)).length,
-        returningVisitors: rows.filter(r => r.is_new_visitor != null && !isNewFn(r.is_new_visitor)).length,
+        newVisitors: Object.values(visitorNewMap).filter(v => v === true).length,
+        returningVisitors: Object.values(visitorNewMap).filter(v => v === false).length,
       };
     }
 
@@ -1464,7 +1478,14 @@ export const getBehaviorRates = async ({
     if (error) throw error;
 
     const rows = data || [];
-    const sessions = rows.filter(r => r.event_type === 'session_end');
+    // session_id 기준 중복제거 (같은 session에 session_end 여러 개 대응)
+    const sessionMap = {};
+    rows.filter(r => r.event_type === 'session_end').forEach(r => {
+      if (!r.session_id) return;
+      if (!sessionMap[r.session_id]) sessionMap[r.session_id] = r;
+      else if (r.is_bounce === true) sessionMap[r.session_id].is_bounce = true;
+    });
+    const sessions = Object.values(sessionMap);
     const total = sessions.length;
     const bounced = sessions.filter(r => r.is_bounce === true).length;
     const refreshed = rows.filter(r => r.event_type === 'page_refresh').length;
