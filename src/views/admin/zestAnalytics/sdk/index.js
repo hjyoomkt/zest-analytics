@@ -147,6 +147,13 @@
         }
       });
 
+      // iOS bfcache 복귀 시 visibilitychange:visible 미발화 대응
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted && this.pausedAt !== null) {
+          this._resumeSession();
+        }
+      });
+
       // 실제 이탈 (pagehide: iOS Safari 대응, beforeunload: 데스크탑)
       window.addEventListener('pagehide', () => this._endSession());
       window.addEventListener('beforeunload', () => this._endSession());
@@ -681,8 +688,12 @@
     _onInteraction() {
       this.lastInteractionTime = Date.now();
       if (this.activeStartTime === null) {
-        // idle 상태에서 복귀 → 활성 구간 재시작
-        this.activeStartTime = Date.now();
+        if (this.pausedAt !== null) {
+          // visibilitychange/pageshow 미발화 시 첫 터치·스크롤로 복귀 감지
+          this._resumeSession();
+        } else {
+          this.activeStartTime = Date.now();
+        }
       }
       this._resetIdleTimer();
     }
@@ -732,6 +743,7 @@
      * @private
      */
     _resumeSession() {
+      if (this.activeStartTime !== null) return; // pageshow + visibilitychange 동시 발화 방지
       const now = Date.now();
       const away = this.pausedAt ? (now - this.pausedAt) : 0;
       this.pausedAt = null;
@@ -804,6 +816,7 @@
         tracking_id: this.trackingId,
         event_type: 'session_end',
         session_id: this.sessionId,
+        visitor_id: this.visitorId,
         time_on_page: timeOnPage,
         page_url: window.location.href,
         scroll_depth: this.maxScrollDepth,
