@@ -51,6 +51,7 @@
       this._sameOriginNavTimer = null;
       this._pendingSessionEnd = null; // 지연된 session_end 타이머 (bfcache 취소용)
       this._wasNavigatedFrom = false; // 이 페이지에서 링크로 떠난 적 있는지 (bfcache 복귀 시 pageview 여부)
+      this._isInternalBackNav = false; // Navigation API: 같은 사이트 뒤로가기 감지 (bfcache 미지원 브라우저용)
       this.lastInteractionTime = null;
       this.idleTimer = null;
       this.shortIdleTimer = null;
@@ -153,6 +154,24 @@
       document.addEventListener('mousedown', _markSameOriginNav, true);
       document.addEventListener('touchstart', _markSameOriginNav, { passive: true, capture: true });
 
+      // Navigation API (Chrome 102+): 뒤로가기/앞으로가기 감지 (bfcache 미지원 환경 대응)
+      // e.navigationType === 'traverse' = 뒤로/앞으로 버튼 누름
+      // e.destination.url 이 같은 사이트면 내부 이동 → session_end 억제
+      if (window.navigation) {
+        window.navigation.addEventListener('navigate', (e) => {
+          if (e.navigationType === 'traverse') {
+            try {
+              const dest = new URL(e.destination.url);
+              if (dest.origin === window.location.origin) {
+                this._isInternalBackNav = true;
+              }
+            } catch (_) {
+              // 목적지 URL 접근 불가 = cross-origin → session_end 억제 안 함
+            }
+          }
+        });
+      }
+
       // 탭 전환 처리
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
@@ -188,13 +207,18 @@
       });
 
       // pagehide 분기:
+      // 0) persisted=false + _isInternalBackNav → Navigation API가 감지한 같은 사이트 뒤로가기 → 억제
       // 1) persisted=false → 실제 언로드(탭 닫기, 외부이동) 또는 bfcache 퇴출
       //    → za_bfcache_exit 있으면 복원 후 session_end 전송
       // 2) persisted=true + sameOriginNav → 링크 클릭 내부 이동 → carry time 저장
       // 3) persisted=true + !sameOriginNav → 뒤로가기/홈버튼 → session_end 보류(sessionStorage)
       // beforeunload 제거: Firefox에서 beforeunload 리스너가 있으면 bfcache 자체를 차단함
       window.addEventListener('pagehide', (e) => {
-        if (!e.persisted) {
+        if (!e.persisted && this._isInternalBackNav) {
+          // Navigation API가 감지한 같은 사이트 뒤로가기 (bfcache 미지원 환경)
+          this._isInternalBackNav = false;
+          this._suppressSessionEnd();
+        } else if (!e.persisted) {
           try {
             const raw = sessionStorage.getItem('za_bfcache_exit');
             if (raw) {
@@ -816,6 +840,24 @@
           this._sendSessionEnd();
         }, 0);
       }
+    }
+
+    /**
+     * Navigation API가 감지한 같은 사이트 뒤로가기 → session_end 억제 (bfcache 미지원 환경)
+     * @private
+     */
+    _suppressSessionEnd() {
+      if (this._pendingSessionEnd) {
+        clearTimeout(this._pendingSessionEnd);
+        this._pendingSessionEnd = null;
+      }
+      if (this.activeStartTime !== null) {
+        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+      if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+      if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
+      this.pausedAt = Date.now();
     }
 
     /**
