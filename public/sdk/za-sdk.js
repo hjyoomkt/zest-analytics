@@ -163,10 +163,20 @@
       });
 
       // bfcache 복귀 처리
-      // - 링크 클릭으로 떠난 뒤 뒤로가기로 돌아온 경우: pageview 기록 + 세션 재개
-      // - 홈버튼/탭전환으로 일시 중단됐다가 복귀한 경우: 세션 재개만 (pageview 없음)
+      // pageshow.persisted=true = 우리 사이트 페이지가 복원됨 = 사용자가 아직 사이트 안에 있음
+      // → za_bfcache_exit(보류 중인 session_end) 취소 + 체류시간 복원
       window.addEventListener('pageshow', (e) => {
         if (e.persisted) {
+          try {
+            const raw = sessionStorage.getItem('za_bfcache_exit');
+            if (raw) {
+              const pending = JSON.parse(raw);
+              if (pending.sid === this.sessionId) {
+                sessionStorage.removeItem('za_bfcache_exit');
+                this.accumulatedTime += (pending.time || 0);
+              }
+            }
+          } catch (_) {}
           if (this._wasNavigatedFrom) {
             this.trackPageView();
             this._wasNavigatedFrom = false;
@@ -177,15 +187,29 @@
         }
       });
 
-      // 실제 이탈 vs bfcache 진입 분기
-      // beforeunload 제거: Firefox에서 beforeunload 리스너가 있으면 bfcache 자체를 차단하므로 pagehide로 통합
+      // pagehide 분기:
+      // 1) persisted=false → 실제 언로드(탭 닫기, 외부이동) 또는 bfcache 퇴출
+      //    → za_bfcache_exit 있으면 복원 후 session_end 전송
+      // 2) persisted=true + sameOriginNav → 링크 클릭 내부 이동 → carry time 저장
+      // 3) persisted=true + !sameOriginNav → 뒤로가기/홈버튼 → session_end 보류(sessionStorage)
+      // beforeunload 제거: Firefox에서 beforeunload 리스너가 있으면 bfcache 자체를 차단함
       window.addEventListener('pagehide', (e) => {
-        if (e.persisted && !this._sameOriginNav) {
-          // bfcache 진입 + 링크 클릭 이동이 아님 = 뒤로가기/홈버튼 → 일시정지만
-          this._bfcachePause();
-        } else {
-          // 실제 언로드 또는 링크 클릭 이동 → 기존 세션 종료 로직
+        if (!e.persisted) {
+          try {
+            const raw = sessionStorage.getItem('za_bfcache_exit');
+            if (raw) {
+              const pending = JSON.parse(raw);
+              if (pending.sid === this.sessionId) {
+                sessionStorage.removeItem('za_bfcache_exit');
+                this.accumulatedTime += (pending.time || 0);
+              }
+            }
+          } catch (_) {}
           this._endSession();
+        } else if (this._sameOriginNav) {
+          this._endSession();
+        } else {
+          this._saveBfcacheExit();
         }
       });
 
@@ -795,10 +819,12 @@
     }
 
     /**
-     * bfcache 진입 (뒤로가기/홈버튼) → session_end 없이 일시정지만
+     * 뒤로가기/홈버튼으로 bfcache 진입 → session_end를 sessionStorage에 보류
+     * - 같은 사이트 페이지가 pageshow.persisted=true로 복원되면 취소 (내부 이동)
+     * - bfcache 퇴출(pagehide persisted=false)되면 그때 전송 (외부 이탈)
      * @private
      */
-    _bfcachePause() {
+    _saveBfcacheExit() {
       if (this._pendingSessionEnd) {
         clearTimeout(this._pendingSessionEnd);
         this._pendingSessionEnd = null;
@@ -810,7 +836,17 @@
       if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
       if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
       this.pausedAt = Date.now();
-      // _wasNavigatedFrom은 건드리지 않음 (false 유지)
+      if (this.accumulatedTime >= this.MIN_SESSION_DURATION) {
+        try {
+          sessionStorage.setItem('za_bfcache_exit', JSON.stringify({
+            sid: this.sessionId,
+            time: this.accumulatedTime,
+          }));
+          this.accumulatedTime = 0;
+        } catch (_) {
+          this._sendSessionEnd();
+        }
+      }
     }
 
     /**
