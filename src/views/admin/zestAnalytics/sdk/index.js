@@ -48,10 +48,19 @@
       this.accumulatedTime = 0;      // 누적 활성 시간 (초)
       this.pausedAt = null;          // 탭 숨김 시각 (복귀 시 경과 시간 계산용)
       this._sameOriginNav = false;   // 같은 사이트 링크 클릭 여부 (내부 이동 감지)
+      this._sameOriginNavTimer = null;
+      this._pendingSessionEnd = null; // 지연된 session_end 타이머 (bfcache 취소용)
+      this._wasNavigatedFrom = false; // 이 페이지에서 링크로 떠난 적 있는지 (bfcache 복귀 시 pageview 여부)
       this.lastInteractionTime = null;
       this.idleTimer = null;
-      this.IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
-      this.MIN_SESSION_DURATION = 3;       // 3초 미만 노이즈 필터
+      this.shortIdleTimer = null;
+      this._isNaverApp = /NAVER/i.test(navigator.userAgent); // 네이버 인앱 감지
+      const _ua = navigator.userAgent;
+      this._useShortIdle = this._isNaverApp ||
+        (/Safari/i.test(_ua) && !/Chrome/i.test(_ua) && /Mobile/i.test(_ua)); // 네이버앱 + 모바일 Safari
+      this.IDLE_TIMEOUT = 30 * 60 * 1000;       // 30분
+      this.SHORT_IDLE_TIMEOUT = 3 * 60 * 1000;  // 3분 (네이버앱 + 모바일 Safari)
+      this.MIN_SESSION_DURATION = 3;             // 3초 미만 노이즈 필터
     }
 
     /**
@@ -126,17 +135,23 @@
       this._resetIdleTimer();
 
       // 같은 사이트 링크 클릭 감지 (내부 이동 vs 진짜 이탈 구분)
-      document.addEventListener('click', (e) => {
+      // mousedown + touchstart: WKWebView에서 click보다 먼저 발화해 native 이동 전 감지
+      const _markSameOriginNav = (e) => {
         const a = e.target.closest('a[href]');
-        if (a) {
-          try {
-            const url = new URL(a.href, window.location.href);
-            if (url.hostname === window.location.hostname) {
-              this._sameOriginNav = true;
-            }
-          } catch (_) {}
-        }
-      }, true);
+        if (!a) return;
+        try {
+          const url = new URL(a.href, window.location.href);
+          if (url.hostname !== window.location.hostname) return;
+          this._sameOriginNav = true;
+          if (this._sameOriginNavTimer) clearTimeout(this._sameOriginNavTimer);
+          this._sameOriginNavTimer = setTimeout(() => {
+            this._sameOriginNav = false;
+            this._sameOriginNavTimer = null;
+          }, 2000);
+        } catch (_) {}
+      };
+      document.addEventListener('mousedown', _markSameOriginNav, true);
+      document.addEventListener('touchstart', _markSameOriginNav, { passive: true, capture: true });
 
       // 탭 전환 처리
       document.addEventListener('visibilitychange', () => {
@@ -147,16 +162,32 @@
         }
       });
 
-      // iOS bfcache 복귀 시 visibilitychange:visible 미발화 대응
+      // bfcache 복귀 처리
+      // - 링크 클릭으로 떠난 뒤 뒤로가기로 돌아온 경우: pageview 기록 + 세션 재개
+      // - 홈버튼/탭전환으로 일시 중단됐다가 복귀한 경우: 세션 재개만 (pageview 없음)
       window.addEventListener('pageshow', (e) => {
-        if (e.persisted && this.pausedAt !== null) {
-          this._resumeSession();
+        if (e.persisted) {
+          if (this._wasNavigatedFrom) {
+            this.trackPageView();
+            this._wasNavigatedFrom = false;
+          }
+          if (this.pausedAt !== null) {
+            this._resumeSession();
+          }
         }
       });
 
-      // 실제 이탈 (pagehide: iOS Safari 대응, beforeunload: 데스크탑)
-      window.addEventListener('pagehide', () => this._endSession());
-      window.addEventListener('beforeunload', () => this._endSession());
+      // 실제 이탈 vs bfcache 진입 분기
+      // beforeunload 제거: Firefox에서 beforeunload 리스너가 있으면 bfcache 자체를 차단하므로 pagehide로 통합
+      window.addEventListener('pagehide', (e) => {
+        if (e.persisted && !this._sameOriginNav) {
+          // bfcache 진입 + 링크 클릭 이동이 아님 = 뒤로가기/홈버튼 → 일시정지만
+          this._bfcachePause();
+        } else {
+          // 실제 언로드 또는 링크 클릭 이동 → 기존 세션 종료 로직
+          this._endSession();
+        }
+      });
 
       // 대기열 처리
       this._flushQueue();
@@ -696,6 +727,7 @@
         }
       }
       this._resetIdleTimer();
+      if (this._useShortIdle) this._resetShortIdleTimer();
     }
 
     /**
@@ -707,17 +739,35 @@
       this.idleTimer = setTimeout(() => this._onIdle(), this.IDLE_TIMEOUT);
     }
 
+    _resetShortIdleTimer() {
+      if (this.shortIdleTimer) clearTimeout(this.shortIdleTimer);
+      this.shortIdleTimer = setTimeout(() => this._onShortIdle(), this.SHORT_IDLE_TIMEOUT);
+    }
+
     /**
      * 30분 무활동 → 세션 종료 후 새 세션 준비
      * @private
      */
     _onIdle() {
+      if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
       if (this.activeStartTime !== null) {
         this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
         this.activeStartTime = null;
       }
       this._sendSessionEnd();
       this._resetSession();
+    }
+
+    // 3분 무활동 → 마지막 상호작용 시점 기준으로 session_end (네이버앱 보조)
+    _onShortIdle() {
+      this.shortIdleTimer = null;
+      if (this.activeStartTime !== null) {
+        const endTime = this.lastInteractionTime || Date.now();
+        this.accumulatedTime += Math.round((endTime - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+      this._sendSessionEnd();
+      this._resetIdleTimer(); // 30분 타이머 리셋 (3분 idle 후 불필요한 세션 리셋 방지)
     }
 
     /**
@@ -730,12 +780,37 @@
         this.activeStartTime = null;
       }
       if (this.idleTimer) clearTimeout(this.idleTimer);
+      if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
       this.pausedAt = Date.now();
       // 내부 이동이 아닐 때만 session_end 전송 (모바일 앱/탭 닫기 대응)
-      // visibilitychange에서 전송해야 iOS에서 sendBeacon 성공률이 높음
+      // setTimeout(0)으로 지연: pagehide가 persisted=true면 _bfcachePause()가 취소함
+      // (visibilitychange:hidden → pagehide 순서로 동기 발화하므로 타이머가 실행 전에 취소 가능)
+      // 탭 전환 시에는 pagehide가 없으므로 타이머가 그대로 실행됨
       if (!this._sameOriginNav) {
-        this._sendSessionEnd();
+        this._pendingSessionEnd = setTimeout(() => {
+          this._pendingSessionEnd = null;
+          this._sendSessionEnd();
+        }, 0);
       }
+    }
+
+    /**
+     * bfcache 진입 (뒤로가기/홈버튼) → session_end 없이 일시정지만
+     * @private
+     */
+    _bfcachePause() {
+      if (this._pendingSessionEnd) {
+        clearTimeout(this._pendingSessionEnd);
+        this._pendingSessionEnd = null;
+      }
+      if (this.activeStartTime !== null) {
+        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+      if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+      if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
+      this.pausedAt = Date.now();
+      // _wasNavigatedFrom은 건드리지 않음 (false 유지)
     }
 
     /**
@@ -762,15 +837,23 @@
      * @private
      */
     _endSession() {
+      if (this._pendingSessionEnd) {
+        clearTimeout(this._pendingSessionEnd);
+        this._pendingSessionEnd = null;
+      }
+      if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
       if (this.activeStartTime !== null) {
         this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
         this.activeStartTime = null;
       }
+      if (this._sameOriginNavTimer) { clearTimeout(this._sameOriginNavTimer); this._sameOriginNavTimer = null; }
+      if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
       if (this._sameOriginNav) {
         // 같은 사이트 내 페이지 이동 → 시간을 다음 페이지로 이월
         this._saveCarryTime();
         this._sameOriginNav = false;
-        this.accumulatedTime = 0; // pagehide 후 beforeunload 중복 전송 차단
+        this.accumulatedTime = 0;
+        this._wasNavigatedFrom = true; // 뒤로가기로 이 페이지에 돌아왔을 때 pageview 기록하도록
       } else {
         // 진짜 이탈 (탭 닫기, 외부 사이트 이동)
         this._sendSessionEnd();
@@ -830,16 +913,15 @@
         device_type: deviceInfo.device_type,
       });
 
-      // sendBeacon: text/plain으로 전송해 CORS preflight 우회 (Deno req.json()은 content-type 무관하게 파싱)
-      if (navigator.sendBeacon) {
+      // fetch keepalive: Safari bfcache에서 sendBeacon 드롭 버그 우회
+      // string body → Content-Type: text/plain → CORS preflight 없음
+      let sent = false;
+      try {
+        fetch(API_ENDPOINT, { method: 'POST', body, keepalive: true }).catch(() => {});
+        sent = true;
+      } catch (e) {}
+      if (!sent && navigator.sendBeacon) {
         navigator.sendBeacon(API_ENDPOINT, body);
-      } else {
-        fetch(API_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-          keepalive: true,
-        }).catch(() => {});
       }
     }
 
@@ -855,6 +937,7 @@
       this.maxScrollDepth = 0;
       this.scrollBuckets = new Array(10).fill(0);
       this.idleTimer = null;
+      if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
     }
 
     /**
