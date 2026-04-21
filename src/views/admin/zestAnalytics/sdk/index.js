@@ -108,6 +108,9 @@
         this._captureParams();
       }
 
+      // 이전 페이지 보류 session_end 처리 (mobile Safari 등 bfcache 미지원 환경)
+      this._checkPendingExit();
+
       // 페이지뷰 자동 추적
       this.trackPageView();
 
@@ -163,10 +166,15 @@
             try {
               const dest = new URL(e.destination.url);
               if (dest.origin === window.location.origin) {
+                // 같은 사이트 뒤로가기 → session_end 억제
                 this._isInternalBackNav = true;
+              } else {
+                // 외부 사이트로 뒤로가기: bfcache로 얼어붙기 전에 즉시 session_end 전송
+                this._endSession();
               }
             } catch (_) {
-              // 목적지 URL 접근 불가 = cross-origin → session_end 억제 안 함
+              // 목적지 URL 접근 불가 = cross-origin → 즉시 전송
+              this._endSession();
             }
           }
         });
@@ -229,7 +237,13 @@
               }
             }
           } catch (_) {}
-          this._endSession();
+          if (!window.navigation) {
+            // Navigation API 없는 브라우저 (mobile Safari 등):
+            // 뒤로가기 vs 외부이탈 구분 불가 → 다음 페이지에서 back_forward 여부로 판단
+            this._writePendingExit();
+          } else {
+            this._endSession();
+          }
         } else if (this._sameOriginNav) {
           this._endSession();
         } else {
@@ -858,6 +872,88 @@
       if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
       if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
       this.pausedAt = Date.now();
+    }
+
+    /**
+     * Navigation API 없는 브라우저(mobile Safari 등)에서 pagehide 시
+     * session_end 데이터를 sessionStorage에 보류 → 다음 페이지가 back_forward 여부로 판단
+     * @private
+     */
+    _writePendingExit() {
+      if (this._pendingSessionEnd) {
+        clearTimeout(this._pendingSessionEnd);
+        this._pendingSessionEnd = null;
+      }
+      if (this.activeStartTime !== null) {
+        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        this.activeStartTime = null;
+      }
+      if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+      if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
+      if (this.accumulatedTime < this.MIN_SESSION_DURATION) return;
+      const deviceInfo = this._getDeviceInfo();
+      const utmParams = this._getStoredUtmParams();
+      try {
+        sessionStorage.setItem('za_pending_exit', JSON.stringify({
+          sid: this.sessionId,
+          time: this.accumulatedTime,
+          url: window.location.href,
+          scrollDepth: this.maxScrollDepth,
+          scrollBuckets: this.scrollBuckets,
+          channel: this._detectChannel(),
+          utmSource: utmParams?.utm_source || null,
+          utmMedium: utmParams?.utm_medium || null,
+          utmCampaign: utmParams?.utm_campaign || null,
+          utmTerm: utmParams?.utm_term || null,
+          utmContent: utmParams?.utm_content || null,
+          deviceType: deviceInfo.device_type,
+          ts: Date.now(),
+        }));
+        this.accumulatedTime = 0;
+      } catch (_) {
+        this._sendSessionEnd(); // sessionStorage 실패 시 즉시 전송
+      }
+    }
+
+    /**
+     * 페이지 초기화 시 za_pending_exit 확인 (mobile Safari bfcache 미지원 대응)
+     * back_forward 진입이면 취소(내부 이동), 아니면 지연 전송(외부 이탈 확정)
+     * @private
+     */
+    _checkPendingExit() {
+      const raw = sessionStorage.getItem('za_pending_exit');
+      if (!raw) return;
+      try {
+        const pending = JSON.parse(raw);
+        sessionStorage.removeItem('za_pending_exit');
+        if (Date.now() - (pending.ts || 0) > 30 * 60 * 1000) return; // 30분 초과 폐기
+        const navType = performance.getEntriesByType('navigation')[0]?.type;
+        if (navType === 'back_forward') return; // 뒤로가기로 도착 = 이전 이탈은 내부 이동 → 취소
+        // 외부 유입 확정 → 보류했던 session_end 전송
+        if ((pending.time || 0) < this.MIN_SESSION_DURATION) return;
+        const body = JSON.stringify({
+          tracking_id: this.trackingId,
+          event_type: 'session_end',
+          session_id: pending.sid,
+          visitor_id: this.visitorId,
+          time_on_page: pending.time,
+          page_url: pending.url,
+          scroll_depth: pending.scrollDepth || 0,
+          scroll_buckets: pending.scrollBuckets || [0,0,0,0,0,0,0,0,0,0],
+          channel: pending.channel,
+          utm_source: pending.utmSource,
+          utm_medium: pending.utmMedium,
+          utm_campaign: pending.utmCampaign,
+          utm_term: pending.utmTerm,
+          utm_content: pending.utmContent,
+          device_type: pending.deviceType,
+        });
+        try {
+          fetch(API_ENDPOINT, { method: 'POST', body, keepalive: true }).catch(() => {});
+        } catch (_) {
+          navigator.sendBeacon?.(API_ENDPOINT, body);
+        }
+      } catch (_) {}
     }
 
     /**
