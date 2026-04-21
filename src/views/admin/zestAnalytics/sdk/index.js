@@ -226,6 +226,9 @@
           // Navigation API가 감지한 같은 사이트 뒤로가기 (bfcache 미지원 환경)
           this._isInternalBackNav = false;
           this._suppressSessionEnd();
+        } else if (!e.persisted && this._sameOriginNav) {
+          // 링크 클릭 내부 이동 (bfcache 미지원 환경) → carry time 저장
+          this._endSession();
         } else if (!e.persisted) {
           try {
             const raw = sessionStorage.getItem('za_bfcache_exit');
@@ -239,7 +242,7 @@
           } catch (_) {}
           if (!window.navigation) {
             // Navigation API 없는 브라우저 (mobile Safari 등):
-            // 뒤로가기 vs 외부이탈 구분 불가 → 다음 페이지에서 back_forward 여부로 판단
+            // 뒤로가기 vs 외부이탈 구분 불가 → localStorage에 보류 (탭 닫아도 유지)
             this._writePendingExit();
           } else {
             this._endSession();
@@ -894,7 +897,7 @@
       const deviceInfo = this._getDeviceInfo();
       const utmParams = this._getStoredUtmParams();
       try {
-        sessionStorage.setItem('za_pending_exit', JSON.stringify({
+        localStorage.setItem('za_pending_exit', JSON.stringify({
           sid: this.sessionId,
           time: this.accumulatedTime,
           url: window.location.href,
@@ -921,11 +924,11 @@
      * @private
      */
     _checkPendingExit() {
-      const raw = sessionStorage.getItem('za_pending_exit');
+      const raw = localStorage.getItem('za_pending_exit');
       if (!raw) return;
       try {
         const pending = JSON.parse(raw);
-        sessionStorage.removeItem('za_pending_exit');
+        localStorage.removeItem('za_pending_exit');
         if (Date.now() - (pending.ts || 0) > 30 * 60 * 1000) return; // 30분 초과 폐기
         const navType = performance.getEntriesByType('navigation')[0]?.type;
         if (navType === 'back_forward') return; // 뒤로가기로 도착 = 이전 이탈은 내부 이동 → 취소
