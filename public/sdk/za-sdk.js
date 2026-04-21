@@ -966,6 +966,8 @@
         if (Date.now() - (pending.ts || 0) > 30 * 60 * 1000) return; // 30분 초과 폐기
         const navType = performance.getEntriesByType('navigation')[0]?.type;
         if (navType === 'back_forward') return; // 뒤로가기로 도착 = 이전 이탈은 내부 이동 → 취소
+        // sessionId 동일 = 같은 탭 내부 이동 (NAVER inapp/Safari 등 back_forward 미보고 환경 대응)
+        if (this.sessionId === pending.sid) return;
         // 외부 유입 확정 → 보류했던 session_end 전송
         if ((pending.time || 0) < this.MIN_SESSION_DURATION) return;
         const body = JSON.stringify({
