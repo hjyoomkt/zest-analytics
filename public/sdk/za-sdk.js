@@ -224,7 +224,8 @@
       window.addEventListener('pagehide', (e) => {
         // heartbeat: session_end 실패 대비 현재 상태 임시 저장 (sendBeacon으로 안정적 전송)
         // 내부 링크 클릭(_sameOriginNav)은 carry time으로 처리되므로 제외
-        if (!this._sameOriginNav && this.trackingId && this.sessionId) {
+        const _hbDeviceInfo = this._getDeviceInfo();
+        if (!this._sameOriginNav && this.trackingId && this.sessionId && _hbDeviceInfo.device_type === 'mobile') {
           const now = Date.now();
           const lastActive = this.lastInteractionTime || now;
           const elapsed = this.activeStartTime !== null
@@ -233,7 +234,7 @@
           const timeOnPage = this.accumulatedTime + elapsed;
           if (timeOnPage >= this.MIN_SESSION_DURATION) {
             const utmParams = this._getStoredUtmParams();
-            const deviceInfo = this._getDeviceInfo();
+            const deviceInfo = _hbDeviceInfo;
             const hbBody = JSON.stringify({
               tracking_id:   this.trackingId,
               event_type:    'heartbeat',
