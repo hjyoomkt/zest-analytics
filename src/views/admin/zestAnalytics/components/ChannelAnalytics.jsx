@@ -11,6 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
+  ButtonGroup,
   Flex,
   HStack,
   VStack,
@@ -283,6 +284,7 @@ export default function ChannelAnalytics({
   const { isOpen: isColOpen, onOpen: onColOpen, onClose: onColClose } = useDisclosure();
 
   const [attributionModel, setAttributionModel] = useState('first_touch');
+  const [avgMode, setAvgMode] = useState('session'); // 'session' | 'visitor'
 
   const [data,       setData]       = useState(() => {
     const key = _cacheKey(advertiserId, startDate, endDate, 'first_touch');
@@ -351,9 +353,18 @@ export default function ChannelAnalytics({
     return mult * String(aVal).localeCompare(String(bVal));
   });
 
+  const AVG_MODE_KEY = { avgTimeOnPage: 'avgTimeOnPagePerVisitor', avgScrollDepth: 'avgScrollDepthPerVisitor' };
+  const AVG_MODE_LABEL = { avgTimeOnPage: '평균 체류시간 (방문자)', avgScrollDepth: '평균 도달률 (방문자)' };
+
   const activeMetricCols = METRIC_COLUMNS
     .filter((c) => visibleCols.includes(c.key))
-    .map((c) => c.key === 'users' ? { ...c, label: ATTRIBUTION_USER_LABEL[attributionModel] } : c);
+    .map((c) => {
+      if (c.key === 'users') return { ...c, label: ATTRIBUTION_USER_LABEL[attributionModel] };
+      if (avgMode === 'visitor' && AVG_MODE_KEY[c.key]) {
+        return { ...c, dataKey: AVG_MODE_KEY[c.key], label: AVG_MODE_LABEL[c.key] };
+      }
+      return { ...c, dataKey: c.key };
+    });
 
   // 헤더 "열 저장" 버튼: 현재 적용된 컬럼을 localStorage에 즉시 저장
   const handleSaveCurrentCols = () => {
@@ -429,7 +440,33 @@ export default function ChannelAnalytics({
           채널 분석
         </Text>
 
-        <Flex gap={2} align="center">
+        <Flex gap={2} align="center" flexWrap="wrap">
+          {/* 세션/방문자 기준 토글 */}
+          <ButtonGroup size="xs" isAttached variant="outline">
+            <Button
+              onClick={() => setAvgMode('session')}
+              bg={avgMode === 'session' ? 'brand.500' : inputBg}
+              color={avgMode === 'session' ? 'white' : dropdownTextColor}
+              borderColor={dropdownBorderColor}
+              fontWeight="600"
+              _hover={{ bg: avgMode === 'session' ? 'brand.600' : bgHover }}
+              borderRadius="8px 0 0 8px"
+            >
+              세션 기준
+            </Button>
+            <Button
+              onClick={() => setAvgMode('visitor')}
+              bg={avgMode === 'visitor' ? 'brand.500' : inputBg}
+              color={avgMode === 'visitor' ? 'white' : dropdownTextColor}
+              borderColor={dropdownBorderColor}
+              fontWeight="600"
+              _hover={{ bg: avgMode === 'visitor' ? 'brand.600' : bgHover }}
+              borderRadius="0 8px 8px 0"
+            >
+              방문자 기준
+            </Button>
+          </ButtonGroup>
+
           {/* 어트리뷰션 기준 선택 */}
           <Menu>
             <MenuButton
@@ -642,7 +679,7 @@ export default function ChannelAnalytics({
                   {activeMetricCols.map((col) => (
                     <Td key={col.key} isNumeric py={3} px={3} borderColor={borderColor}>
                       <MetricCell
-                        value={row[col.key]}
+                        value={row[col.dataKey ?? col.key]}
                         format={col.format}
                         highlighted={sortKey === col.key}
                       />

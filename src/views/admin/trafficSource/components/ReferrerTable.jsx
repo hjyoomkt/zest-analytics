@@ -12,6 +12,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
+  ButtonGroup,
   Flex,
   Text,
   Button,
@@ -256,11 +257,12 @@ function ColCheckItem({ label, isChecked, onClick, brandColor, borderColor, sele
 function calcTotal(rows, activeMetricCols) {
   if (rows.length === 0) return null;
   const total = { source: '합계', lastUtmChannel: null };
-  activeMetricCols.forEach(({ key, format }) => {
+  activeMetricCols.forEach(({ key, dataKey, format }) => {
+    const dk = dataKey ?? key;
     if (['rate', 'percent'].includes(format)) {
-      total[key] = null;
+      total[dk] = null;
     } else {
-      total[key] = rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+      total[dk] = rows.reduce((s, r) => s + (Number(r[dk]) || 0), 0);
     }
   });
   const totVisitors   = rows.reduce((s, r) => s + (r.visitors || 0), 0);
@@ -273,6 +275,8 @@ function calcTotal(rows, activeMetricCols) {
   total.avgOrderValue          = totPurchases > 0 ? Math.round(totRevenue / totPurchases) : 0;
   total.avgTimeOnPage          = null;
   total.avgScrollDepth         = null;
+  total.avgTimeOnPagePerVisitor = null;
+  total.avgScrollDepthPerVisitor = null;
   return total;
 }
 
@@ -292,6 +296,8 @@ export default function ReferrerTable({
 }) {
   const toast = useToast();
   const { isOpen: isColOpen, onOpen: onColOpen, onClose: onColClose } = useDisclosure();
+
+  const [avgMode, setAvgMode] = useState('session'); // 'session' | 'visitor'
 
   const [data,        setData]        = useState(() => {
     const key = _cacheKey(advertiserId, startDate, endDate);
@@ -363,7 +369,17 @@ export default function ReferrerTable({
     return mult * String(aVal).localeCompare(String(bVal));
   });
 
-  const activeMetricCols = METRIC_COLUMNS.filter((c) => visibleCols.includes(c.key));
+  const AVG_MODE_KEY = { avgTimeOnPage: 'avgTimeOnPagePerVisitor', avgScrollDepth: 'avgScrollDepthPerVisitor' };
+  const AVG_MODE_LABEL = { avgTimeOnPage: '평균 체류시간 (방문자)', avgScrollDepth: '평균 도달률 (방문자)' };
+
+  const activeMetricCols = METRIC_COLUMNS
+    .filter((c) => visibleCols.includes(c.key))
+    .map((c) => {
+      if (avgMode === 'visitor' && AVG_MODE_KEY[c.key]) {
+        return { ...c, dataKey: AVG_MODE_KEY[c.key], label: AVG_MODE_LABEL[c.key] };
+      }
+      return { ...c, dataKey: c.key };
+    });
   const totalRow         = calcTotal(sortedData, activeMetricCols);
 
   // 열 선택 Popover 열기 (draft 초기화)
@@ -445,7 +461,33 @@ export default function ReferrerTable({
           유입 경로 분석
         </Text>
 
-        <Flex gap={2} align="center">
+        <Flex gap={2} align="center" flexWrap="wrap">
+          {/* 세션/방문자 기준 토글 */}
+          <ButtonGroup size="xs" isAttached variant="outline">
+            <Button
+              onClick={() => setAvgMode('session')}
+              bg={avgMode === 'session' ? 'brand.500' : inputBg}
+              color={avgMode === 'session' ? 'white' : dropdownTextColor}
+              borderColor={dropdownBorderColor}
+              fontWeight="600"
+              _hover={{ bg: avgMode === 'session' ? 'brand.600' : bgHover }}
+              borderRadius="8px 0 0 8px"
+            >
+              세션 기준
+            </Button>
+            <Button
+              onClick={() => setAvgMode('visitor')}
+              bg={avgMode === 'visitor' ? 'brand.500' : inputBg}
+              color={avgMode === 'visitor' ? 'white' : dropdownTextColor}
+              borderColor={dropdownBorderColor}
+              fontWeight="600"
+              _hover={{ bg: avgMode === 'visitor' ? 'brand.600' : bgHover }}
+              borderRadius="0 8px 8px 0"
+            >
+              방문자 기준
+            </Button>
+          </ButtonGroup>
+
           {/* 어트리뷰션 기준 선택 */}
           <Tooltip
             label={
@@ -701,7 +743,7 @@ export default function ReferrerTable({
                   </Td>
                   {activeMetricCols.map((col) => (
                     <Td key={col.key} isNumeric py={3} px={3} borderColor={borderColor}>
-                      <MetricCell value={totalRow[col.key]} format={col.format} highlighted={sortKey === col.key} />
+                      <MetricCell value={totalRow[col.dataKey ?? col.key]} format={col.format} highlighted={sortKey === col.key} />
                     </Td>
                   ))}
                 </Tr>
@@ -729,7 +771,7 @@ export default function ReferrerTable({
                     </Td>
                     {activeMetricCols.map((col) => (
                       <Td key={col.key} isNumeric py={3} px={3} borderColor={borderColor}>
-                        <MetricCell value={row[col.key]} format={col.format} highlighted={sortKey === col.key} />
+                        <MetricCell value={row[col.dataKey ?? col.key]} format={col.format} highlighted={sortKey === col.key} />
                       </Td>
                     ))}
                   </Tr>

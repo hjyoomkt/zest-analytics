@@ -222,6 +222,38 @@
       // 3) persisted=true + !sameOriginNav → 뒤로가기/홈버튼 → session_end 보류(sessionStorage)
       // beforeunload 제거: Firefox에서 beforeunload 리스너가 있으면 bfcache 자체를 차단함
       window.addEventListener('pagehide', (e) => {
+        // heartbeat: session_end 실패 대비 현재 상태 임시 저장 (sendBeacon으로 안정적 전송)
+        // 내부 링크 클릭(_sameOriginNav)은 carry time으로 처리되므로 제외
+        if (!this._sameOriginNav && this.trackingId && this.sessionId) {
+          const now = Date.now();
+          const lastActive = this.lastInteractionTime || now;
+          const elapsed = this.activeStartTime !== null
+            ? Math.max(0, Math.round((Math.min(lastActive, now) - this.activeStartTime) / 1000))
+            : 0;
+          const timeOnPage = this.accumulatedTime + elapsed;
+          if (timeOnPage >= this.MIN_SESSION_DURATION) {
+            const utmParams = this._getStoredUtmParams();
+            const deviceInfo = this._getDeviceInfo();
+            const hbBody = JSON.stringify({
+              tracking_id:   this.trackingId,
+              event_type:    'heartbeat',
+              session_id:    this.sessionId,
+              visitor_id:    this.visitorId,
+              page_url:      window.location.href,
+              time_on_page:  timeOnPage,
+              scroll_depth:  this.maxScrollDepth,
+              scroll_buckets: this.scrollBuckets,
+              channel:       this._detectChannel(),
+              device_type:   deviceInfo.device_type,
+              utm_source:    utmParams?.utm_source   || null,
+              utm_medium:    utmParams?.utm_medium   || null,
+              utm_campaign:  utmParams?.utm_campaign || null,
+              utm_term:      utmParams?.utm_term     || null,
+              utm_content:   utmParams?.utm_content  || null,
+            });
+            try { navigator.sendBeacon(API_ENDPOINT, hbBody); } catch (_) {}
+          }
+        }
         if (!e.persisted && this._isInternalBackNav) {
           // Navigation API가 감지한 같은 사이트 뒤로가기 (bfcache 미지원 환경)
           this._isInternalBackNav = false;
@@ -816,7 +848,8 @@
     _onIdle() {
       if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
       if (this.activeStartTime !== null) {
-        this.accumulatedTime += Math.round((Date.now() - this.activeStartTime) / 1000);
+        const idleEndTime = Math.max(this.activeStartTime, this.lastInteractionTime || 0);
+        this.accumulatedTime += Math.round((idleEndTime - this.activeStartTime) / 1000);
         this.activeStartTime = null;
       }
       this._sendSessionEnd();

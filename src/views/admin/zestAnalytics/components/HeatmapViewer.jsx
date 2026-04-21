@@ -1032,13 +1032,45 @@ function ScrollStatsPanel({
   pageStats, trendData, loading, deviceTab, label,
   cardBg, borderColor, textColor, subTextColor, bgColor, reachColor,
 }) {
+  const [avgMode, setAvgMode] = useState('session');
+  const avgScrollDepth = avgMode === 'session'
+    ? (pageStats?.avgScrollDepth ?? 0)
+    : (pageStats?.avgScrollDepthPerVisitor ?? 0);
+  const avgLabel = avgMode === 'session' ? '평균 도달률 (세션)' : '평균 도달률 (방문자)';
+
   return (
     <Box w={{ base: '100%', xl: '320px' }} flexShrink={0}>
+      <Flex justify="flex-end" mb="8px">
+        <ButtonGroup size="xs" isAttached variant="outline">
+          <Button
+            onClick={() => setAvgMode('session')}
+            bg={avgMode === 'session' ? 'brand.500' : 'transparent'}
+            color={avgMode === 'session' ? 'white' : subTextColor}
+            borderColor={borderColor}
+            fontWeight="600"
+            _hover={{ opacity: 0.85 }}
+            borderRadius="8px 0 0 8px"
+          >
+            세션
+          </Button>
+          <Button
+            onClick={() => setAvgMode('visitor')}
+            bg={avgMode === 'visitor' ? 'brand.500' : 'transparent'}
+            color={avgMode === 'visitor' ? 'white' : subTextColor}
+            borderColor={borderColor}
+            fontWeight="600"
+            _hover={{ opacity: 0.85 }}
+            borderRadius="0 8px 8px 0"
+          >
+            방문자
+          </Button>
+        </ButtonGroup>
+      </Flex>
       <SimpleGrid columns={2} spacing="12px" mb="12px">
         {[
           { label: '방문자', value: loading ? null : (pageStats?.visitors ?? '-'), sessionEnd: false },
           { label: '페이지뷰', value: loading ? null : (pageStats?.pageviews ?? '-'), sessionEnd: false },
-          { label: '평균 도달률', value: loading ? null : (pageStats ? `${pageStats.avgScrollDepth}%` : '-'), sessionEnd: true },
+          { label: avgLabel, value: loading ? null : (pageStats ? `${avgScrollDepth}%` : '-'), sessionEnd: true },
           { label: '세션 수', value: loading ? null : (pageStats?.totalSessions ?? '-'), sessionEnd: true },
         ].map(({ label: lbl, value, sessionEnd }) => (
           <Box key={lbl} bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px">

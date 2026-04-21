@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const validEventTypes = ['purchase', 'signup', 'lead', 'add_to_cart', 'custom', 'pageview', 'session_end', 'click'];
+    const validEventTypes = ['purchase', 'signup', 'lead', 'add_to_cart', 'custom', 'pageview', 'session_end', 'click', 'heartbeat'];
     if (!validEventTypes.includes(payload.event_type)) {
       return new Response(JSON.stringify({ error: 'Invalid event_type' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -105,6 +105,37 @@ Deno.serve(async (req) => {
 
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || null;
     const userAgent = req.headers.get('user-agent') || null;
+
+    // heartbeat → za_session_heartbeats upsert
+    if (payload.event_type === 'heartbeat') {
+      if (!payload.session_id) {
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      await supabaseAdmin.from('za_session_heartbeats').upsert({
+        session_id:        payload.session_id,
+        tracking_id:       payload.tracking_id,
+        advertiser_id:     trackingCode.advertiser_id,
+        visitor_id:        payload.visitor_id   || null,
+        page_url:          payload.page_url      || null,
+        time_on_page:      payload.time_on_page  ?? 0,
+        scroll_depth:      payload.scroll_depth  ?? 0,
+        scroll_buckets:    payload.scroll_buckets ?? [0,0,0,0,0,0,0,0,0,0],
+        channel:           payload.channel       || null,
+        device_type:       payload.device_type   || null,
+        utm_source:        payload.utm_source    || null,
+        utm_medium:        payload.utm_medium    || null,
+        utm_campaign:      payload.utm_campaign  || null,
+        utm_term:          payload.utm_term      || null,
+        utm_content:       payload.utm_content   || null,
+        last_heartbeat_at: new Date().toISOString(),
+      }, { onConflict: 'session_id' });
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // 클릭 이벤트 → za_click_events
     if (payload.event_type === 'click') {
@@ -178,6 +209,14 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Failed to save event', details: insertError.message }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // session_end 수신 시 heartbeat 삭제 (cron 중복 처리 방지)
+    if (isSessionEnd && payload.session_id) {
+      await supabaseAdmin
+        .from('za_session_heartbeats')
+        .delete()
+        .eq('session_id', payload.session_id);
     }
 
     return new Response(JSON.stringify({ success: true }), {

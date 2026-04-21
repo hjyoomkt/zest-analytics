@@ -914,7 +914,7 @@ export const getHeatmapPageStats = async ({
     // 페이지뷰 + 방문자 (정규화 URL의 모든 원본 URL 포함)
     let pvQuery = supabase
       .from('za_events')
-      .select('visitor_id')
+      .select('visitor_id, session_id')
       .in('advertiser_id', ids)
       .eq('event_type', 'pageview')
       .in('page_url', urls)
@@ -943,28 +943,46 @@ export const getHeatmapPageStats = async ({
 
     const pvData = pvResult.data || [];
 
+    // pageview 기준 session_id → visitor_id 맵 (session_end에는 visitor_id가 NULL)
+    const hmVisitorMap = {};
+    pvData.forEach(r => { if (r.session_id && r.visitor_id) hmVisitorMap[r.session_id] = r.visitor_id; });
+
     // session_id 기준 scroll_depth MAX 집계
     const seScrollMap = {};
     (seResult.data || []).forEach(r => {
       if (!r.session_id) return;
-      seScrollMap[r.session_id] = Math.max(seScrollMap[r.session_id] ?? 0, r.scroll_depth || 0);
+      if (!seScrollMap[r.session_id]) seScrollMap[r.session_id] = { scroll: 0, visitor_id: hmVisitorMap[r.session_id] || null };
+      seScrollMap[r.session_id].scroll = Math.max(seScrollMap[r.session_id].scroll, r.scroll_depth || 0);
     });
-    const seData = Object.values(seScrollMap).map(scroll_depth => ({ scroll_depth }));
+    const seData = Object.values(seScrollMap);
 
     const uniqueVisitors = new Set(pvData.map((r) => r.visitor_id).filter(Boolean)).size;
     const avgDepth =
       seData.length > 0
-        ? Math.round(seData.reduce((s, r) => s + r.scroll_depth, 0) / seData.length)
+        ? Math.round(seData.reduce((s, r) => s + r.scroll, 0) / seData.length)
         : 0;
     const total = seData.length;
 
+    // visitor 기준 scroll_depth 집계
+    const visitorScrollMap = {};
+    seData.forEach(s => {
+      const vid = s.visitor_id;
+      if (!vid) return;
+      visitorScrollMap[vid] = Math.max(visitorScrollMap[vid] ?? 0, s.scroll);
+    });
+    const visitorScrollValues = Object.values(visitorScrollMap);
+    const avgDepthPerVisitor = visitorScrollValues.length > 0
+      ? Math.round(visitorScrollValues.reduce((s, v) => s + v, 0) / visitorScrollValues.length)
+      : 0;
+
     const reachAt = (threshold) =>
-      total > 0 ? Math.round((seData.filter((r) => r.scroll_depth >= threshold).length / total) * 100) : 0;
+      total > 0 ? Math.round((seData.filter((r) => r.scroll >= threshold).length / total) * 100) : 0;
 
     return {
       visitors: uniqueVisitors,
       pageviews: pvData.length,
       avgScrollDepth: avgDepth,
+      avgScrollDepthPerVisitor: avgDepthPerVisitor,
       reach10:  reachAt(10),
       reach20:  reachAt(20),
       reach30:  reachAt(30),
@@ -1157,11 +1175,15 @@ export const getDashboardKPIs = async ({
     // 방문자당 페이지뷰 = 전체 페이지뷰 / 고유 방문자
     const pagesPerVisit = uniqueVisitors > 0 ? parseFloat((pageviews / uniqueVisitors).toFixed(2)) : 0;
 
+    // pageview 기준 session_id → visitor_id 맵 (session_end에는 visitor_id가 NULL)
+    const sessionVisitorMap = {};
+    pvRows.forEach(r => { if (r.session_id && r.visitor_id) sessionVisitorMap[r.session_id] = r.visitor_id; });
+
     // session_id 기준으로 먼저 집계 (같은 세션에 session_end 여러 개 대응)
     const sessionAggMap = {};
     seRows.forEach(r => {
       if (!r.session_id) return;
-      if (!sessionAggMap[r.session_id]) sessionAggMap[r.session_id] = { time: 0, scroll: 0 };
+      if (!sessionAggMap[r.session_id]) sessionAggMap[r.session_id] = { time: 0, scroll: 0, visitor_id: sessionVisitorMap[r.session_id] || null };
       sessionAggMap[r.session_id].time += r.time_on_page || 0;
       sessionAggMap[r.session_id].scroll = Math.max(sessionAggMap[r.session_id].scroll, r.scroll_depth || 0);
     });
@@ -1175,6 +1197,25 @@ export const getDashboardKPIs = async ({
     const sessionsWithScroll = aggSessions.filter(r => r.scroll > 0);
     const avgScrollDepth = sessionsWithScroll.length > 0
       ? Math.round(sessionsWithScroll.reduce((s, r) => s + r.scroll, 0) / sessionsWithScroll.length)
+      : 0;
+
+    // visitor_id 기준 집계 (세션 합산 후 방문자별 평균)
+    const visitorAggMap = {};
+    aggSessions.forEach(s => {
+      const vid = s.visitor_id;
+      if (!vid) return;
+      if (!visitorAggMap[vid]) visitorAggMap[vid] = { time: 0, scroll: 0 };
+      visitorAggMap[vid].time += s.time;
+      visitorAggMap[vid].scroll = Math.max(visitorAggMap[vid].scroll, s.scroll);
+    });
+    const aggVisitors = Object.values(visitorAggMap);
+    const visitorsWithTime = aggVisitors.filter(r => r.time > 0);
+    const avgTimeOnSitePerVisitor = visitorsWithTime.length > 0
+      ? Math.round(visitorsWithTime.reduce((s, r) => s + r.time, 0) / visitorsWithTime.length)
+      : 0;
+    const visitorsWithScroll = aggVisitors.filter(r => r.scroll > 0);
+    const avgScrollDepthPerVisitor = visitorsWithScroll.length > 0
+      ? Math.round(visitorsWithScroll.reduce((s, r) => s + r.scroll, 0) / visitorsWithScroll.length)
       : 0;
 
     // 신규/재방문: session_end 우선, 없으면 pageview에서 visitor 기준으로 집계
@@ -1210,6 +1251,8 @@ export const getDashboardKPIs = async ({
       pagesPerVisit,
       avgTimeOnSite,
       avgScrollDepth,
+      avgTimeOnSitePerVisitor,
+      avgScrollDepthPerVisitor,
       newVisitors,
       returningVisitors,
     };
@@ -1889,6 +1932,10 @@ export const getUTMBreakdown = async ({
           totalTimeOnPage: 0,
           sessionEndCount: 0,
           totalScrollDepth: 0,
+          totalTimePerVisitor: 0,
+          visitorTimeCount: 0,
+          totalScrollPerVisitor: 0,
+          visitorScrollCount: 0,
         };
       }
       return groups[key];
@@ -1930,11 +1977,14 @@ export const getUTMBreakdown = async ({
     });
 
     // Pass 2: session_end 이벤트로 체류시간/스크롤 집계 (session_id 기준 먼저 합산)
+    // pageview 기준 session_id → visitor_id 맵 (session_end에는 visitor_id가 NULL)
+    const seVisitorMap = {};
+    (data || []).forEach(e => { if (e.event_type === 'pageview' && e.session_id && e.visitor_id) seVisitorMap[e.session_id] = e.visitor_id; });
     const seAggMap = {};
     sessionEndEvents.forEach((event) => {
       if (!event.session_id) return;
       const key = sessionGroupMap[event.session_id] || [event.channel || 'direct', '-', '-', '-'].join('|');
-      if (!seAggMap[event.session_id]) seAggMap[event.session_id] = { key, time: 0, scroll: 0 };
+      if (!seAggMap[event.session_id]) seAggMap[event.session_id] = { key, time: 0, scroll: 0, visitor_id: seVisitorMap[event.session_id] || null };
       seAggMap[event.session_id].time += event.time_on_page || 0;
       seAggMap[event.session_id].scroll = Math.max(seAggMap[event.session_id].scroll, event.scroll_depth || 0);
     });
@@ -1945,6 +1995,26 @@ export const getUTMBreakdown = async ({
       g.totalTimeOnPage += time;
       g.sessionEndCount++;
       g.totalScrollDepth += scroll;
+    });
+
+    // visitor 기준 집계 (session 합산 후 visitor별 평균)
+    const visitorGroupAggMap = {};
+    Object.values(seAggMap).forEach(({ key, time, scroll, visitor_id }) => {
+      if (!visitor_id || time <= 0) return;
+      const vk = `${visitor_id}||${key}`;
+      if (!visitorGroupAggMap[vk]) visitorGroupAggMap[vk] = { key, time: 0, scroll: 0 };
+      visitorGroupAggMap[vk].time += time;
+      visitorGroupAggMap[vk].scroll = Math.max(visitorGroupAggMap[vk].scroll, scroll);
+    });
+    Object.values(visitorGroupAggMap).forEach(({ key, time, scroll }) => {
+      const g = groups[key];
+      if (!g) return;
+      g.totalTimePerVisitor += time;
+      g.visitorTimeCount++;
+      if (scroll > 0) {
+        g.totalScrollPerVisitor += scroll;
+        g.visitorScrollCount++;
+      }
     });
 
     // 최종 결과 배열 변환 및 정렬
@@ -1961,6 +2031,8 @@ export const getUTMBreakdown = async ({
           avgPageviewsPerUser: userCount > 0 ? +(g.pageviews / userCount).toFixed(2) : 0,
           avgTimeOnPage: g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
           avgScrollDepth: g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
+          avgTimeOnPagePerVisitor: g.visitorTimeCount > 0 ? +(g.totalTimePerVisitor / g.visitorTimeCount).toFixed(1) : 0,
+          avgScrollDepthPerVisitor: g.visitorScrollCount > 0 ? +(g.totalScrollPerVisitor / g.visitorScrollCount).toFixed(1) : 0,
           purchases: g.purchases,
           revenue: g.revenue,
           addToCarts: g.addToCarts,
@@ -2049,6 +2121,10 @@ export const getReferrerBreakdown = async ({
           totalTimeOnPage: 0,
           sessionEndCount: 0,
           totalScrollDepth: 0,
+          totalTimePerVisitor: 0,
+          visitorTimeCount: 0,
+          totalScrollPerVisitor: 0,
+          visitorScrollCount: 0,
         };
       }
       return groups[ref];
@@ -2085,6 +2161,9 @@ export const getReferrerBreakdown = async ({
       });
 
     // Pass 2: session_end → 체류시간/스크롤 (session_id 기준 먼저 합산)
+    // pageview 기준 session_id → visitor_id 맵 (session_end에는 visitor_id가 NULL)
+    const refVisitorMap = {};
+    rows.forEach(e => { if (e.event_type === 'pageview' && e.session_id && e.visitor_id) refVisitorMap[e.session_id] = e.visitor_id; });
     const refSeAggMap = {};
     rows
       .filter((e) => e.event_type === 'session_end')
@@ -2092,7 +2171,7 @@ export const getReferrerBreakdown = async ({
         if (!event.session_id) return;
         const ref = sessionRefMap[event.session_id];
         if (!ref || !groups[ref]) return;
-        if (!refSeAggMap[event.session_id]) refSeAggMap[event.session_id] = { ref, time: 0, scroll: 0 };
+        if (!refSeAggMap[event.session_id]) refSeAggMap[event.session_id] = { ref, time: 0, scroll: 0, visitor_id: refVisitorMap[event.session_id] || null };
         refSeAggMap[event.session_id].time += event.time_on_page || 0;
         refSeAggMap[event.session_id].scroll = Math.max(refSeAggMap[event.session_id].scroll, event.scroll_depth || 0);
       });
@@ -2103,6 +2182,26 @@ export const getReferrerBreakdown = async ({
       g.totalTimeOnPage += time;
       g.sessionEndCount++;
       g.totalScrollDepth += scroll;
+    });
+
+    // visitor 기준 집계
+    const refVisitorAggMap = {};
+    Object.values(refSeAggMap).forEach(({ ref, time, scroll, visitor_id }) => {
+      if (!visitor_id || time <= 0) return;
+      const vk = `${visitor_id}||${ref}`;
+      if (!refVisitorAggMap[vk]) refVisitorAggMap[vk] = { ref, time: 0, scroll: 0 };
+      refVisitorAggMap[vk].time += time;
+      refVisitorAggMap[vk].scroll = Math.max(refVisitorAggMap[vk].scroll, scroll);
+    });
+    Object.values(refVisitorAggMap).forEach(({ ref, time, scroll }) => {
+      const g = groups[ref];
+      if (!g) return;
+      g.totalTimePerVisitor += time;
+      g.visitorTimeCount++;
+      if (scroll > 0) {
+        g.totalScrollPerVisitor += scroll;
+        g.visitorScrollCount++;
+      }
     });
 
     // Pass 3: 전환 이벤트 → 세션 referrer 귀속
@@ -2136,6 +2235,8 @@ export const getReferrerBreakdown = async ({
           pageviews:              g.pageviews,
           avgTimeOnPage:          g.sessionEndCount > 0 ? +(g.totalTimeOnPage / g.sessionEndCount).toFixed(1) : 0,
           avgScrollDepth:         g.sessionEndCount > 0 ? +(g.totalScrollDepth / g.sessionEndCount).toFixed(1) : 0,
+          avgTimeOnPagePerVisitor: g.visitorTimeCount > 0 ? +(g.totalTimePerVisitor / g.visitorTimeCount).toFixed(1) : 0,
+          avgScrollDepthPerVisitor: g.visitorScrollCount > 0 ? +(g.totalScrollPerVisitor / g.visitorScrollCount).toFixed(1) : 0,
           signups:                g.signups,
           memberConversionRate:   vc > 0 ? +((g.signups / vc) * 100).toFixed(2) : 0,
           purchasers:             g.purchasers.size,

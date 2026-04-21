@@ -24,6 +24,8 @@ import React, { useState } from 'react';
 import { useStableFetch } from 'hooks/useStableFetch';
 import {
   Box,
+  Button,
+  ButtonGroup,
   Icon,
   SimpleGrid,
   useColorModeValue,
@@ -59,12 +61,16 @@ export default function MainDashboard() {
   const { currentAdvertiserId, availableAdvertisers } = useAuth();
   const { startDate, endDate } = useDateRange();
 
+  const [avgMode, setAvgMode] = useState('session'); // 'session' | 'visitor'
+
   const [kpi, setKpi] = useState({
     visitors: 0,
     pageviews: 0,
     pagesPerVisit: 0,
     avgTimeOnSite: 0,
     avgScrollDepth: 0,
+    avgTimeOnSitePerVisitor: 0,
+    avgScrollDepthPerVisitor: 0,
     newVisitors: 0,
     returningVisitors: 0,
   });
@@ -108,6 +114,32 @@ export default function MainDashboard() {
       {/* 날짜 선택 */}
       <DateRangePicker />
 
+      {/* 세션/방문자 기준 토글 */}
+      <ButtonGroup size="xs" isAttached variant="outline" mb="12px">
+        <Button
+          onClick={() => setAvgMode('session')}
+          colorScheme={avgMode === 'session' ? 'brand' : 'gray'}
+          bg={avgMode === 'session' ? 'brand.500' : undefined}
+          color={avgMode === 'session' ? 'white' : undefined}
+          borderRadius="8px 0 0 8px"
+          fontWeight="600"
+          px={3}
+        >
+          세션 기준
+        </Button>
+        <Button
+          onClick={() => setAvgMode('visitor')}
+          colorScheme={avgMode === 'visitor' ? 'brand' : 'gray'}
+          bg={avgMode === 'visitor' ? 'brand.500' : undefined}
+          color={avgMode === 'visitor' ? 'white' : undefined}
+          borderRadius="0 8px 8px 0"
+          fontWeight="600"
+          px={3}
+        >
+          방문자 기준
+        </Button>
+      </ButtonGroup>
+
       {/* KPI 카드 6개 */}
       <SimpleGrid
         columns={{ base: 1, md: 2, lg: 3, '2xl': 6 }}
@@ -137,8 +169,8 @@ export default function MainDashboard() {
               icon={<Icon w='32px' h='32px' as={MdTimer} color={brandColor} />}
             />
           }
-          name='평균 체류시간'
-          value={loading ? '...' : formatTime(kpi.avgTimeOnSite)}
+          name={avgMode === 'session' ? '평균 체류시간 (세션)' : '평균 체류시간 (방문자)'}
+          value={loading ? '...' : formatTime(avgMode === 'session' ? kpi.avgTimeOnSite : kpi.avgTimeOnSitePerVisitor)}
           sessionEndTooltip
         />
         <MiniStatistics
@@ -147,8 +179,8 @@ export default function MainDashboard() {
               icon={<Icon w='32px' h='32px' as={MdTrendingDown} color={brandColor} />}
             />
           }
-          name='평균 스크롤 깊이'
-          value={loading ? '...' : `${kpi.avgScrollDepth}%`}
+          name={avgMode === 'session' ? '평균 스크롤 깊이 (세션)' : '평균 스크롤 깊이 (방문자)'}
+          value={loading ? '...' : `${avgMode === 'session' ? kpi.avgScrollDepth : kpi.avgScrollDepthPerVisitor}%`}
           sessionEndTooltip
         />
         <MiniStatistics
