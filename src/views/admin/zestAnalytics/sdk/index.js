@@ -1124,8 +1124,8 @@
     _saveCarryTime() {
       this._saveScrollToMap();
       try {
+        // accumulatedTime은 페이지별 독립 측정 — 캐리 제외, 다음 페이지는 0에서 시작
         sessionStorage.setItem('za_carry', JSON.stringify({
-          accumulatedTime: this.accumulatedTime,
           sessionId: this.sessionId,
           maxScrollDepth: this.maxScrollDepth,
           scrollBuckets: this.scrollBuckets,
@@ -1140,7 +1140,7 @@
         sessionStorage.removeItem('za_carry');
         const carry = JSON.parse(raw);
         if (carry.sessionId === this.sessionId) {
-          this.accumulatedTime = carry.accumulatedTime || 0;
+          // accumulatedTime은 캐리하지 않음 — 페이지별 독립 측정
         }
       } catch (_) {}
     }
