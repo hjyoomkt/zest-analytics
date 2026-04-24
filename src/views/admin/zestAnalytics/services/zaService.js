@@ -26,6 +26,8 @@ const TRACKING_PARAMS = new Set([
   'ttclid', 'twclid', 'li_fat_id', 'igshid',
   'za_source', 'za_medium', 'za_campaign', 'za_term', 'za_content',
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id',
+  'shopping_order_code', 'back_url', 'order_code', 'order_no', 'order_member',
+  'used_login_btn',
 ]);
 
 /**
@@ -956,7 +958,7 @@ export const getHeatmapPageStats = async ({
       if (!r.session_id) return;
       if (!seScrollMap[r.session_id]) seScrollMap[r.session_id] = { scroll: 0, time: 0, visitor_id: hmVisitorMap[r.session_id] || null };
       seScrollMap[r.session_id].scroll = Math.max(seScrollMap[r.session_id].scroll, r.scroll_depth || 0);
-      seScrollMap[r.session_id].time = Math.max(seScrollMap[r.session_id].time, r.time_on_page || 0);
+      seScrollMap[r.session_id].time += r.time_on_page || 0;
     });
     const seData = Object.values(seScrollMap);
 
@@ -1163,7 +1165,7 @@ export const getDashboardKPIs = async ({
     // session_end 이벤트 조회 (체류시간, 스크롤, 신규/재방문)
     let seQuery = supabase
       .from('za_events')
-      .select('visitor_id, session_id, time_on_page, scroll_depth, is_new_visitor')
+      .select('visitor_id, session_id, page_url, time_on_page, scroll_depth, is_new_visitor')
       .in('advertiser_id', ids)
       .eq('event_type', 'session_end')
       .gte('created_at', startTs)
@@ -1188,15 +1190,32 @@ export const getDashboardKPIs = async ({
     const sessionVisitorMap = {};
     pvRows.forEach(r => { if (r.session_id && r.visitor_id) sessionVisitorMap[r.session_id] = r.visitor_id; });
 
-    // session_id 기준으로 먼저 집계 (같은 세션에 session_end 여러 개 대응)
-    const sessionAggMap = {};
+    // 1단계: (session_id, page_url) 기준 → 스크롤 MAX + 체류시간 SUM
+    const sessionPageMap = {};
     seRows.forEach(r => {
       if (!r.session_id) return;
-      if (!sessionAggMap[r.session_id]) sessionAggMap[r.session_id] = { time: 0, scroll: 0, visitor_id: sessionVisitorMap[r.session_id] || null };
-      sessionAggMap[r.session_id].time += r.time_on_page || 0;
-      sessionAggMap[r.session_id].scroll = Math.max(sessionAggMap[r.session_id].scroll, r.scroll_depth || 0);
+      const key = `${r.session_id}::${r.page_url || ''}`;
+      if (!sessionPageMap[key]) sessionPageMap[key] = { session_id: r.session_id, scroll: 0, time: 0, visitor_id: sessionVisitorMap[r.session_id] || null };
+      sessionPageMap[key].scroll = Math.max(sessionPageMap[key].scroll, r.scroll_depth || 0);
+      sessionPageMap[key].time += r.time_on_page || 0;
     });
-    const aggSessions = Object.values(sessionAggMap);
+
+    // 2단계: session_id 기준 → 체류시간 SUM + 스크롤 페이지별 AVG
+    const sessionAggMap = {};
+    Object.values(sessionPageMap).forEach(p => {
+      const sid = p.session_id;
+      if (!sessionAggMap[sid]) sessionAggMap[sid] = { time: 0, scrollSum: 0, scrollPageCount: 0, visitor_id: p.visitor_id };
+      sessionAggMap[sid].time += p.time;
+      if (p.scroll > 0) {
+        sessionAggMap[sid].scrollSum += p.scroll;
+        sessionAggMap[sid].scrollPageCount += 1;
+      }
+    });
+    // 세션별 평균 스크롤 산출
+    const aggSessions = Object.values(sessionAggMap).map(s => ({
+      ...s,
+      scroll: s.scrollPageCount > 0 ? s.scrollSum / s.scrollPageCount : 0,
+    }));
 
     const sessionsWithTime = aggSessions.filter(r => r.time > 0);
     const avgTimeOnSite = sessionsWithTime.length > 0

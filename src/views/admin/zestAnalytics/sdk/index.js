@@ -55,6 +55,7 @@
       this.lastInteractionTime = null;
       this.idleTimer = null;
       this.shortIdleTimer = null;
+      this._channel = null;                                   // 세션 진입 채널 (1회 캡처)
       this._isNaverApp = /NAVER/i.test(navigator.userAgent); // 네이버 인앱 감지
       const _ua = navigator.userAgent;
       this._useShortIdle = this._isNaverApp ||
@@ -110,6 +111,9 @@
 
       // 이전 페이지 보류 session_end 처리 (mobile Safari 등 bfcache 미지원 환경)
       this._checkPendingExit();
+
+      // 세션 진입 채널 1회 캡처 (내부 이동 시 document.referrer가 바뀌어도 유지)
+      this._channel = this._getSessionChannel();
 
       // 페이지뷰 자동 추적
       this.trackPageView();
@@ -253,7 +257,7 @@
               scroll_depth:    this.maxScrollDepth,
               scroll_buckets:  this.scrollBuckets,
               page_scroll_map: _hbScrollMap,
-              channel:         this._detectChannel(),
+              channel:         this._channel || this._detectChannel(),
               device_type:     deviceInfo.device_type,
               utm_source:      utmParams?.utm_source   || null,
               utm_medium:      utmParams?.utm_medium   || null,
@@ -351,7 +355,7 @@
         page_referrer: document.referrer || null,
         session_id: this.sessionId,
         visitor_id: this.visitorId,
-        channel: this._detectChannel(),
+        channel: this._channel || this._detectChannel(),
         utm_source:   utmParams?.utm_source   || null,
         utm_medium:   utmParams?.utm_medium   || null,
         utm_campaign: utmParams?.utm_campaign || null,
@@ -962,7 +966,7 @@
           scrollDepth: this.maxScrollDepth,
           scrollBuckets: this.scrollBuckets,
           pageScrollMap,
-          channel: this._detectChannel(),
+          channel: this._channel || this._detectChannel(),
           utmSource: utmParams?.utm_source || null,
           utmMedium: utmParams?.utm_medium || null,
           utmCampaign: utmParams?.utm_campaign || null,
@@ -1183,7 +1187,7 @@
         scroll_depth: this.maxScrollDepth,
         scroll_buckets: this.scrollBuckets,
         page_scroll_map: pageScrollMap,
-        channel: this._detectChannel(),
+        channel: this._channel || this._detectChannel(),
         utm_source:   utmParams?.utm_source   || null,
         utm_medium:   utmParams?.utm_medium   || null,
         utm_campaign: utmParams?.utm_campaign || null,
@@ -1211,13 +1215,28 @@
     _resetSession() {
       try { sessionStorage.removeItem('za_sid'); } catch (e) {}
       try { sessionStorage.removeItem('za_page_scrolls'); } catch (_) {}
+      try { sessionStorage.removeItem('za_sch'); } catch (_) {}
       this.sessionId = this._getOrCreateSessionId();
+      this._channel = this._detectChannel();
       this.accumulatedTime = 0;
       this.activeStartTime = null;
       this.maxScrollDepth = 0;
       this.scrollBuckets = new Array(10).fill(0);
       this.idleTimer = null;
       if (this.shortIdleTimer) { clearTimeout(this.shortIdleTimer); this.shortIdleTimer = null; }
+    }
+
+    _getSessionChannel() {
+      try {
+        const raw = sessionStorage.getItem('za_sch');
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (saved.sid === this.sessionId) return saved.ch;
+        }
+      } catch (_) {}
+      const ch = this._detectChannel();
+      try { sessionStorage.setItem('za_sch', JSON.stringify({ sid: this.sessionId, ch })); } catch (_) {}
+      return ch;
     }
 
     /**
