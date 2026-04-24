@@ -232,10 +232,10 @@ export const invalidateIpBlocklistCache = () => {
 const _applyIpFilter = (query, blockedIps) => {
   query = query.not('is_bot', 'is', true);
   if (blockedIps && blockedIps.length > 0) {
-    // inet 컬럼을 text로 캐스팅 후 비교 (PostgREST에서 inet 타입 직접 IN 비교 시 타입 불일치 발생)
-    // inet::text는 '1.2.3.4/32' 형태이므로 비교값도 /32 붙여 정규화
+    // ip_address IS NULL인 행(하트비트→세션엔드 변환 행)은 차단 대상이 아니므로 포함
+    // ::text 캐스팅은 PostgREST or() 구문에서 지원 안 됨 — inet 직접 비교
     const withCidr = blockedIps.map((ip) => (ip.includes('/') ? ip : `${ip}/32`));
-    return query.not('ip_address::text', 'in', `(${withCidr.join(',')})`);
+    return query.or(`ip_address.is.null,ip_address.not.in.(${withCidr.join(',')})`);
   }
   return query;
 };
