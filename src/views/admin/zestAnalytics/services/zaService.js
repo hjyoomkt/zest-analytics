@@ -781,12 +781,14 @@ export const getHeatmapPageList = async ({
       const normalized = normalizeUrl(row.page_url) || row.page_url;
       const count = Number(row.session_count);
       const depth = Number(row.avg_depth);
+      const time = Number(row.avg_time);
       if (!groups.has(normalized)) {
-        groups.set(normalized, { page_url: normalized, session_count: 0, depth_sum: 0, raw_urls: [] });
+        groups.set(normalized, { page_url: normalized, session_count: 0, depth_sum: 0, time_sum: 0, raw_urls: [] });
       }
       const g = groups.get(normalized);
       g.session_count += count;
       g.depth_sum += depth * count;
+      g.time_sum += time * count;
       g.raw_urls.push(row.page_url);
     });
 
@@ -795,6 +797,7 @@ export const getHeatmapPageList = async ({
         page_url: g.page_url,
         session_count: g.session_count,
         avg_depth: g.session_count > 0 ? Math.round(g.depth_sum / g.session_count) : 0,
+        avg_time: g.session_count > 0 ? Math.round(g.time_sum / g.session_count) : 0,
         raw_urls: g.raw_urls,
       }))
       .sort((a, b) => b.session_count - a.session_count);
@@ -904,7 +907,7 @@ export const getHeatmapPageStats = async ({
     const ids = _resolveAdvertiserIds(advertiserId, availableAdvertiserIds);
     const urls = Array.isArray(pageUrls) ? pageUrls.filter(Boolean) : [];
     if (ids.length === 0 || urls.length === 0) {
-      return { visitors: 0, pageviews: 0, avgScrollDepth: 0, reach10: 0, reach20: 0, reach30: 0, reach40: 0, reach50: 0, reach60: 0, reach70: 0, reach80: 0, reach90: 0, reach100: 0, totalSessions: 0 };
+      return { visitors: 0, pageviews: 0, avgScrollDepth: 0, avgTime: 0, reach10: 0, reach20: 0, reach30: 0, reach40: 0, reach50: 0, reach60: 0, reach70: 0, reach80: 0, reach90: 0, reach100: 0, totalSessions: 0 };
     }
 
     const startTs = `${startDate}T00:00:00+09:00`;
@@ -926,7 +929,7 @@ export const getHeatmapPageStats = async ({
     // 스크롤 통계 (session_end)
     let seQuery = supabase
       .from('za_events')
-      .select('session_id, scroll_depth')
+      .select('session_id, scroll_depth, time_on_page')
       .in('advertiser_id', ids)
       .eq('event_type', 'session_end')
       .in('page_url', urls)
@@ -947,12 +950,13 @@ export const getHeatmapPageStats = async ({
     const hmVisitorMap = {};
     pvData.forEach(r => { if (r.session_id && r.visitor_id) hmVisitorMap[r.session_id] = r.visitor_id; });
 
-    // session_id 기준 scroll_depth MAX 집계
+    // session_id 기준 scroll_depth MAX + time_on_page 집계
     const seScrollMap = {};
     (seResult.data || []).forEach(r => {
       if (!r.session_id) return;
-      if (!seScrollMap[r.session_id]) seScrollMap[r.session_id] = { scroll: 0, visitor_id: hmVisitorMap[r.session_id] || null };
+      if (!seScrollMap[r.session_id]) seScrollMap[r.session_id] = { scroll: 0, time: 0, visitor_id: hmVisitorMap[r.session_id] || null };
       seScrollMap[r.session_id].scroll = Math.max(seScrollMap[r.session_id].scroll, r.scroll_depth || 0);
+      seScrollMap[r.session_id].time = Math.max(seScrollMap[r.session_id].time, r.time_on_page || 0);
     });
     const seData = Object.values(seScrollMap);
 
@@ -960,6 +964,10 @@ export const getHeatmapPageStats = async ({
     const avgDepth =
       seData.length > 0
         ? Math.round(seData.reduce((s, r) => s + r.scroll, 0) / seData.length)
+        : 0;
+    const avgTime =
+      seData.length > 0
+        ? Math.round(seData.reduce((s, r) => s + r.time, 0) / seData.length)
         : 0;
     const total = seData.length;
 
@@ -983,6 +991,7 @@ export const getHeatmapPageStats = async ({
       pageviews: pvData.length,
       avgScrollDepth: avgDepth,
       avgScrollDepthPerVisitor: avgDepthPerVisitor,
+      avgTime,
       reach10:  reachAt(10),
       reach20:  reachAt(20),
       reach30:  reachAt(30),

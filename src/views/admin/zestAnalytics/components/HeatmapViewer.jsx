@@ -215,8 +215,12 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
   /** 정렬 적용된 페이지 목록 */
   const sortedPageList = useMemo(() => {
     return [...channelPageList].sort((a, b) => {
-      const aVal = pageListSort.key === 'session_count' ? a.session_count : a.avg_depth;
-      const bVal = pageListSort.key === 'session_count' ? b.session_count : b.avg_depth;
+      const aVal = pageListSort.key === 'session_count' ? a.session_count
+        : pageListSort.key === 'avg_time' ? a.avg_time
+        : a.avg_depth;
+      const bVal = pageListSort.key === 'session_count' ? b.session_count
+        : pageListSort.key === 'avg_time' ? b.avg_time
+        : b.avg_depth;
       return pageListSort.dir === 'desc' ? bVal - aVal : aVal - bVal;
     });
   }, [channelPageList, pageListSort]);
@@ -339,7 +343,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
       const newUrl = event.data.page_url;
       setPageList((prev) => {
         if (!prev.some((p) => p.page_url === newUrl)) {
-          return [{ page_url: newUrl, session_count: 0, avg_depth: 0 }, ...prev];
+          return [{ page_url: newUrl, session_count: 0, avg_depth: 0, avg_time: 0 }, ...prev];
         }
         return prev;
       });
@@ -647,6 +651,18 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
                       {pageListSort.key === 'avg_depth' ? (pageListSort.dir === 'desc' ? '▼' : '▲') : '⇅'}
                     </Text>
                   </Flex>
+                  <Flex
+                    w="80px" justify="flex-end" align="center" gap="3px"
+                    cursor="pointer"
+                    onClick={() => toggleSort('avg_time')}
+                    _hover={{ color: textColor }}
+                    color={pageListSort.key === 'avg_time' ? textColor : subTextColor}
+                  >
+                    <Text fontSize="11px" fontWeight="600">체류시간</Text>
+                    <Text fontSize="10px" lineHeight="1">
+                      {pageListSort.key === 'avg_time' ? (pageListSort.dir === 'desc' ? '▼' : '▲') : '⇅'}
+                    </Text>
+                  </Flex>
                   <Box w="80px" />
                 </Flex>
                 {sortedPageList.map((p) => {
@@ -712,6 +728,11 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
                           {p.avg_depth}%
                         </Text>
                       </Flex>
+                      <Text fontSize="12px" color={subTextColor} w="80px" textAlign="right" fontWeight="500">
+                        {p.avg_time >= 60
+                          ? `${Math.floor(p.avg_time / 60)}분 ${p.avg_time % 60}초`
+                          : `${p.avg_time}초`}
+                      </Text>
                       <Box w="80px" display="flex" justifyContent="flex-end">
                         <Button
                           size="xs"
@@ -1088,6 +1109,27 @@ function ScrollStatsPanel({
           </Box>
         ))}
       </SimpleGrid>
+      <Box bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px" mb="12px">
+        <Flex align="center" gap="4px" mb="4px">
+          <Text fontSize="12px" color={subTextColor}>평균 체류시간</Text>
+          <Tooltip label="session_end 발화 기준 데이터 — 탭 닫기/이탈 시 전송되며 마지막 페이지 이탈 누락 가능" fontSize="xs" placement="top" hasArrow>
+            <span style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}>
+              <Icon as={MdInfoOutline} boxSize="12px" color="gray.400" />
+            </span>
+          </Tooltip>
+        </Flex>
+        {loading ? (
+          <Skeleton h="28px" borderRadius="6px" />
+        ) : (
+          <Text fontSize="24px" fontWeight="700" color={textColor}>
+            {pageStats
+              ? (pageStats.avgTime >= 60
+                ? `${Math.floor(pageStats.avgTime / 60)}분 ${pageStats.avgTime % 60}초`
+                : `${pageStats.avgTime}초`)
+              : '-'}
+          </Text>
+        )}
+      </Box>
 
       <Box bg={cardBg} border="1px solid" borderColor={borderColor} borderRadius="16px" p="16px" mb="12px">
         <Flex align="center" justify="space-between" mb="12px">
