@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
           page_url:      url,
           scroll_depth:  data.scroll_depth ?? null,
           scroll_buckets: data.scroll_buckets ?? null,
-          time_on_page:  0,
+          time_on_page:  data.time_on_page ?? 0,
           channel:       payload.channel || null,
           device_type:   payload.device_type || null,
           utm_source:    payload.utm_source   || null,

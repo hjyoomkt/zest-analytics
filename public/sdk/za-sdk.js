@@ -945,8 +945,14 @@
       try { pageScrollMap = JSON.parse(sessionStorage.getItem('za_page_scrolls') || '{}'); } catch (_) {}
       const _curUrl = window.location.href;
       const _existing = pageScrollMap[_curUrl];
-      if (!_existing || this.maxScrollDepth > _existing.scroll_depth) {
-        pageScrollMap[_curUrl] = { scroll_depth: this.maxScrollDepth, scroll_buckets: this.scrollBuckets.slice() };
+      const _prevTime = _existing ? (_existing.time_on_page || 0) : 0;
+      if (!_existing || this.maxScrollDepth > _existing.scroll_depth || this.accumulatedTime > _prevTime) {
+        pageScrollMap[_curUrl] = {
+          scroll_depth: Math.max(this.maxScrollDepth, _existing ? _existing.scroll_depth : 0),
+          scroll_buckets: this.maxScrollDepth >= (_existing ? _existing.scroll_depth : 0)
+            ? this.scrollBuckets.slice() : _existing.scroll_buckets,
+          time_on_page: Math.max(this.accumulatedTime, _prevTime),
+        };
       }
       try {
         localStorage.setItem('za_pending_exit', JSON.stringify({
@@ -1099,8 +1105,17 @@
         const map = JSON.parse(sessionStorage.getItem('za_page_scrolls') || '{}');
         const url = window.location.href;
         const existing = map[url];
-        if (!existing || this.maxScrollDepth > existing.scroll_depth) {
-          map[url] = { scroll_depth: this.maxScrollDepth, scroll_buckets: this.scrollBuckets.slice() };
+        const activeExtra = this.activeStartTime !== null
+          ? Math.round((Date.now() - this.activeStartTime) / 1000) : 0;
+        const currentTime = this.accumulatedTime + activeExtra;
+        const prevTime = existing ? (existing.time_on_page || 0) : 0;
+        if (!existing || this.maxScrollDepth > existing.scroll_depth || currentTime > prevTime) {
+          map[url] = {
+            scroll_depth: Math.max(this.maxScrollDepth, existing ? existing.scroll_depth : 0),
+            scroll_buckets: this.maxScrollDepth >= (existing ? existing.scroll_depth : 0)
+              ? this.scrollBuckets.slice() : existing.scroll_buckets,
+            time_on_page: Math.max(currentTime, prevTime),
+          };
         }
         sessionStorage.setItem('za_page_scrolls', JSON.stringify(map));
       } catch (_) {}
@@ -1148,9 +1163,13 @@
       } catch (_) {}
       const curUrl = window.location.href;
       const existing = pageScrollMap[curUrl];
-      if (!existing || this.maxScrollDepth > existing.scroll_depth) {
-        pageScrollMap[curUrl] = { scroll_depth: this.maxScrollDepth, scroll_buckets: this.scrollBuckets.slice() };
-      }
+      const prevTime = existing ? (existing.time_on_page || 0) : 0;
+      pageScrollMap[curUrl] = {
+        scroll_depth: Math.max(this.maxScrollDepth, existing ? existing.scroll_depth : 0),
+        scroll_buckets: this.maxScrollDepth >= (existing ? existing.scroll_depth : 0)
+          ? this.scrollBuckets.slice() : existing.scroll_buckets,
+        time_on_page: Math.max(timeOnPage, prevTime),
+      };
 
       const deviceInfo = this._getDeviceInfo();
       const utmParams = this._getStoredUtmParams();
