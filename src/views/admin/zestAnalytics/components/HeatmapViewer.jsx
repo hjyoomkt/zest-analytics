@@ -812,7 +812,7 @@ export default function HeatmapViewer({ advertiserId, availableAdvertiserIds }) 
             </Flex>
             <Box position="relative" minH="600px" bg="white">
               {selectedPage ? (
-                <Box as="iframe" src={iframeUrl} width="100%" height="600px" border="none" title="page-preview-click" sandbox="allow-scripts allow-forms allow-popups" />
+                <Box as="iframe" src={iframeUrl} width="100%" height="600px" border="none" title="page-preview-click" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
               ) : (
                 <Flex align="center" justify="center" h="600px" color={subTextColor}>
                   <Text>좌측 드롭다운에서 페이지를 선택하세요</Text>
@@ -983,7 +983,7 @@ function ScrollHeatmapPanel({
               height="600px"
               border="none"
               title="page-preview"
-              sandbox="allow-scripts allow-forms allow-popups"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
           ) : (
             <Flex align="center" justify="center" h="600px" color={subTextColor}>
