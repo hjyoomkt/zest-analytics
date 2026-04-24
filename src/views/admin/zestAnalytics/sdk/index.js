@@ -235,22 +235,31 @@
           if (timeOnPage >= this.MIN_SESSION_DURATION) {
             const utmParams = this._getStoredUtmParams();
             const deviceInfo = _hbDeviceInfo;
+            // 누적 scroll map에 현재 페이지 추가
+            let _hbScrollMap = {};
+            try { _hbScrollMap = JSON.parse(sessionStorage.getItem('za_page_scrolls') || '{}'); } catch (_) {}
+            const _hbUrl = window.location.href;
+            const _hbExisting = _hbScrollMap[_hbUrl];
+            if (!_hbExisting || this.maxScrollDepth > _hbExisting.scroll_depth) {
+              _hbScrollMap[_hbUrl] = { scroll_depth: this.maxScrollDepth, scroll_buckets: this.scrollBuckets.slice() };
+            }
             const hbBody = JSON.stringify({
-              tracking_id:   this.trackingId,
-              event_type:    'heartbeat',
-              session_id:    this.sessionId,
-              visitor_id:    this.visitorId,
-              page_url:      window.location.href,
-              time_on_page:  timeOnPage,
-              scroll_depth:  this.maxScrollDepth,
-              scroll_buckets: this.scrollBuckets,
-              channel:       this._detectChannel(),
-              device_type:   deviceInfo.device_type,
-              utm_source:    utmParams?.utm_source   || null,
-              utm_medium:    utmParams?.utm_medium   || null,
-              utm_campaign:  utmParams?.utm_campaign || null,
-              utm_term:      utmParams?.utm_term     || null,
-              utm_content:   utmParams?.utm_content  || null,
+              tracking_id:     this.trackingId,
+              event_type:      'heartbeat',
+              session_id:      this.sessionId,
+              visitor_id:      this.visitorId,
+              page_url:        window.location.href,
+              time_on_page:    timeOnPage,
+              scroll_depth:    this.maxScrollDepth,
+              scroll_buckets:  this.scrollBuckets,
+              page_scroll_map: _hbScrollMap,
+              channel:         this._detectChannel(),
+              device_type:     deviceInfo.device_type,
+              utm_source:      utmParams?.utm_source   || null,
+              utm_medium:      utmParams?.utm_medium   || null,
+              utm_campaign:    utmParams?.utm_campaign || null,
+              utm_term:        utmParams?.utm_term     || null,
+              utm_content:     utmParams?.utm_content  || null,
             });
             try { navigator.sendBeacon(API_ENDPOINT, hbBody); } catch (_) {}
           }
@@ -898,6 +907,7 @@
      * @private
      */
     _suppressSessionEnd() {
+      this._saveScrollToMap();
       if (this._pendingSessionEnd) {
         clearTimeout(this._pendingSessionEnd);
         this._pendingSessionEnd = null;
@@ -930,13 +940,22 @@
       if (this.accumulatedTime < this.MIN_SESSION_DURATION) return;
       const deviceInfo = this._getDeviceInfo();
       const utmParams = this._getStoredUtmParams();
+      // 누적 scroll map에 현재 페이지 추가
+      let pageScrollMap = {};
+      try { pageScrollMap = JSON.parse(sessionStorage.getItem('za_page_scrolls') || '{}'); } catch (_) {}
+      const _curUrl = window.location.href;
+      const _existing = pageScrollMap[_curUrl];
+      if (!_existing || this.maxScrollDepth > _existing.scroll_depth) {
+        pageScrollMap[_curUrl] = { scroll_depth: this.maxScrollDepth, scroll_buckets: this.scrollBuckets.slice() };
+      }
       try {
         localStorage.setItem('za_pending_exit', JSON.stringify({
           sid: this.sessionId,
           time: this.accumulatedTime,
-          url: window.location.href,
+          url: _curUrl,
           scrollDepth: this.maxScrollDepth,
           scrollBuckets: this.scrollBuckets,
+          pageScrollMap,
           channel: this._detectChannel(),
           utmSource: utmParams?.utm_source || null,
           utmMedium: utmParams?.utm_medium || null,
@@ -979,6 +998,7 @@
           page_url: pending.url,
           scroll_depth: pending.scrollDepth || 0,
           scroll_buckets: pending.scrollBuckets || [0,0,0,0,0,0,0,0,0,0],
+          page_scroll_map: pending.pageScrollMap || {},
           channel: pending.channel,
           utm_source: pending.utmSource,
           utm_medium: pending.utmMedium,
@@ -1002,6 +1022,7 @@
      * @private
      */
     _saveBfcacheExit() {
+      this._saveScrollToMap();
       if (this._pendingSessionEnd) {
         clearTimeout(this._pendingSessionEnd);
         this._pendingSessionEnd = null;
@@ -1073,7 +1094,20 @@
       }
     }
 
+    _saveScrollToMap() {
+      try {
+        const map = JSON.parse(sessionStorage.getItem('za_page_scrolls') || '{}');
+        const url = window.location.href;
+        const existing = map[url];
+        if (!existing || this.maxScrollDepth > existing.scroll_depth) {
+          map[url] = { scroll_depth: this.maxScrollDepth, scroll_buckets: this.scrollBuckets.slice() };
+        }
+        sessionStorage.setItem('za_page_scrolls', JSON.stringify(map));
+      } catch (_) {}
+    }
+
     _saveCarryTime() {
+      this._saveScrollToMap();
       try {
         sessionStorage.setItem('za_carry', JSON.stringify({
           accumulatedTime: this.accumulatedTime,
@@ -1106,6 +1140,18 @@
       const timeOnPage = this.accumulatedTime;
       this.accumulatedTime = 0;
 
+      // 누적된 페이지별 scroll map 로드 후 현재 페이지 추가 (MAX 유지)
+      let pageScrollMap = {};
+      try {
+        pageScrollMap = JSON.parse(sessionStorage.getItem('za_page_scrolls') || '{}');
+        sessionStorage.removeItem('za_page_scrolls');
+      } catch (_) {}
+      const curUrl = window.location.href;
+      const existing = pageScrollMap[curUrl];
+      if (!existing || this.maxScrollDepth > existing.scroll_depth) {
+        pageScrollMap[curUrl] = { scroll_depth: this.maxScrollDepth, scroll_buckets: this.scrollBuckets.slice() };
+      }
+
       const deviceInfo = this._getDeviceInfo();
       const utmParams = this._getStoredUtmParams();
       const body = JSON.stringify({
@@ -1114,9 +1160,10 @@
         session_id: this.sessionId,
         visitor_id: this.visitorId,
         time_on_page: timeOnPage,
-        page_url: window.location.href,
+        page_url: curUrl,
         scroll_depth: this.maxScrollDepth,
         scroll_buckets: this.scrollBuckets,
+        page_scroll_map: pageScrollMap,
         channel: this._detectChannel(),
         utm_source:   utmParams?.utm_source   || null,
         utm_medium:   utmParams?.utm_medium   || null,
@@ -1144,6 +1191,7 @@
      */
     _resetSession() {
       try { sessionStorage.removeItem('za_sid'); } catch (e) {}
+      try { sessionStorage.removeItem('za_page_scrolls'); } catch (_) {}
       this.sessionId = this._getOrCreateSessionId();
       this.accumulatedTime = 0;
       this.activeStartTime = null;

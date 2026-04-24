@@ -20,8 +20,13 @@ CREATE TABLE IF NOT EXISTS za_session_heartbeats (
   utm_campaign      TEXT,
   utm_term          TEXT,
   utm_content       TEXT,
+  page_scroll_map   JSONB       DEFAULT '{}'::jsonb,
   last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- page_scroll_map 컬럼 추가 (기존 테이블에 적용)
+ALTER TABLE za_session_heartbeats
+  ADD COLUMN IF NOT EXISTS page_scroll_map JSONB DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_za_session_heartbeats_last
   ON za_session_heartbeats (last_heartbeat_at);
@@ -41,7 +46,7 @@ AS $$
 DECLARE
   closed_count integer;
 BEGIN
-  -- stale heartbeat → za_events에 session_end 삽입
+  -- stale heartbeat → za_events에 session_end 삽입 (현재 페이지)
   INSERT INTO za_events (
     tracking_id,
     advertiser_id,
@@ -82,6 +87,48 @@ BEGIN
     AND hb.time_on_page >= 3;  -- MIN_SESSION_DURATION 3초 필터
 
   GET DIAGNOSTICS closed_count = ROW_COUNT;
+
+  -- page_scroll_map의 나머지 페이지들도 session_end로 삽입
+  INSERT INTO za_events (
+    tracking_id,
+    advertiser_id,
+    event_type,
+    session_id,
+    visitor_id,
+    time_on_page,
+    scroll_depth,
+    scroll_buckets,
+    page_url,
+    channel,
+    device_type,
+    utm_source,
+    utm_medium,
+    utm_campaign,
+    utm_term,
+    utm_content
+  )
+  SELECT
+    hb.tracking_id,
+    hb.advertiser_id,
+    'session_end',
+    hb.session_id,
+    hb.visitor_id,
+    0,
+    (entry.value->>'scroll_depth')::integer,
+    entry.value->'scroll_buckets',
+    entry.key,
+    hb.channel,
+    hb.device_type,
+    hb.utm_source,
+    hb.utm_medium,
+    hb.utm_campaign,
+    hb.utm_term,
+    hb.utm_content
+  FROM za_session_heartbeats hb,
+       jsonb_each(hb.page_scroll_map) AS entry(key, value)
+  WHERE hb.last_heartbeat_at < NOW() - INTERVAL '30 minutes'
+    AND hb.time_on_page >= 3
+    AND entry.key <> hb.page_url;  -- 현재 페이지는 위에서 이미 삽입
 
   -- 처리된 heartbeat 삭제
   DELETE FROM za_session_heartbeats

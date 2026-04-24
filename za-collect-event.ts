@@ -122,6 +122,7 @@ Deno.serve(async (req) => {
         time_on_page:      payload.time_on_page  ?? 0,
         scroll_depth:      payload.scroll_depth  ?? 0,
         scroll_buckets:    payload.scroll_buckets ?? [0,0,0,0,0,0,0,0,0,0],
+        page_scroll_map:   payload.page_scroll_map ?? {},
         channel:           payload.channel       || null,
         device_type:       payload.device_type   || null,
         utm_source:        payload.utm_source    || null,
@@ -209,6 +210,34 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Failed to save event', details: insertError.message }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // session_end 수신 시 page_scroll_map의 나머지 페이지들 bulk insert
+    if (isSessionEnd && payload.page_scroll_map && typeof payload.page_scroll_map === 'object') {
+      const mapEntries = Object.entries(payload.page_scroll_map).filter(
+        ([url]) => url !== payload.page_url
+      );
+      if (mapEntries.length > 0) {
+        const rows = mapEntries.map(([url, data]: [string, any]) => ({
+          tracking_id:   payload.tracking_id,
+          advertiser_id: trackingCode.advertiser_id,
+          event_type:    'session_end',
+          session_id:    payload.session_id || null,
+          page_url:      url,
+          scroll_depth:  data.scroll_depth ?? null,
+          scroll_buckets: data.scroll_buckets ?? null,
+          time_on_page:  0,
+          channel:       payload.channel || null,
+          device_type:   payload.device_type || null,
+          utm_source:    payload.utm_source   || null,
+          utm_medium:    payload.utm_medium   || null,
+          utm_campaign:  payload.utm_campaign || null,
+          utm_term:      payload.utm_term     || null,
+          utm_content:   payload.utm_content  || null,
+          ip_address:    ip,
+        }));
+        await supabaseAdmin.from('za_events').insert(rows);
+      }
     }
 
     // session_end 수신 시 heartbeat 삭제 (cron 중복 처리 방지)
